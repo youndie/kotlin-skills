@@ -26,9 +26,9 @@ suspend inline fun <T> suspendRunCatching(block: () -> T): Result<T> = try {
 class CreateOrderUseCase(
     private val canCreate: CanCreateOrderUseCase,
     private val orders: OrderRepository,
-    private val allocateStock: AllocateStockUseCase,
+    private val allocateInventory: AllocateInventoryUseCase,
     private val transactions: TransactionManager,
-    private val stockSync: StockSyncService,        // writes an outbox entry; a worker delivers it
+    private val inventorySync: InventorySyncService,        // writes an outbox entry; a worker delivers it
     private val logEvent: LogEventUseCase,
 ) : UseCase<CreateOrderUseCase.Params, Order> {
 
@@ -38,14 +38,14 @@ class CreateOrderUseCase(
         }
 
         val orderId = transactions.withTransaction {
-            val usage = allocateStock(
-                AllocateStockUseCase.Params(params.order.items, params.workspaceId),
+            val usage = allocateInventory(
+                AllocateInventoryUseCase.Params(params.order.items, params.workspaceId),
             ).getOrElse { throw it }                     // a nested use case's typed error travels up unchanged
             orders.save(params.order, usage, params.workspaceId)
         } ?: throw CommonError.SaveFailure
 
         // The outbox carries the id only; the worker rereads the record at delivery time.
-        stockSync.enqueue(orderId, params.workspaceId)
+        inventorySync.enqueue(orderId, params.workspaceId)
 
         logEvent(
             LogEventUseCase.Params(
@@ -71,10 +71,10 @@ sealed class CommonError : Exception() {
     data object SaveFailure : CommonError()
 }
 
-class AllocateStockUseCase(/* … */) : UseCase<AllocateStockUseCase.Params, List<StockUsage>> {
+class AllocateInventoryUseCase(/* … */) : UseCase<AllocateInventoryUseCase.Params, List<InventoryUsage>> {
     sealed class Error : Exception() {
-        data object NotEnoughStock : Error()
-        data object StockChanged : Error()
+        data object NotEnoughInventory : Error()
+        data object InventoryChanged : Error()
     }
     /* … */
 }
@@ -84,11 +84,11 @@ class AllocateStockUseCase(/* … */) : UseCase<AllocateStockUseCase.Params, Lis
 
 ```kotlin
 /** Lives next to the stock use cases: every route that can hit them maps them the same way. */
-suspend fun RoutingContext.dispatchStockError(error: Throwable) {
+suspend fun RoutingContext.dispatchInventoryError(error: Throwable) {
     when (error) {
-        AllocateStockUseCase.Error.NotEnoughStock -> call.respond(HttpStatusCode.BadRequest, "not enough stock")
-        AllocateStockUseCase.Error.StockChanged -> call.respond(HttpStatusCode.Conflict, "stock has changed")
-        RestoreStockUseCase.Error.ItemNotFound -> call.respond(HttpStatusCode.NotFound, "stock item not found")
+        AllocateInventoryUseCase.Error.NotEnoughInventory -> call.respond(HttpStatusCode.BadRequest, "not enough inventory")
+        AllocateInventoryUseCase.Error.InventoryChanged -> call.respond(HttpStatusCode.Conflict, "inventory has changed")
+        ReleaseInventoryUseCase.Error.ItemNotFound -> call.respond(HttpStatusCode.NotFound, "inventory item not found")
         else -> throw error          // unknown → StatusPages: reported and answered 500
     }
 }
@@ -110,7 +110,7 @@ post<OrdersResource> {
             .onFailure { error ->
                 when (error) {
                     CreateOrderUseCase.Error.LimitReached -> call.respond(HttpStatusCode.BadRequest, ORDER_LIMIT_REACHED)
-                    is AllocateStockUseCase.Error -> dispatchStockError(error)
+                    is AllocateInventoryUseCase.Error -> dispatchInventoryError(error)
                     CommonError.SaveFailure -> {
                         reporter.report(error)                    // unexpected: somebody should look
                         call.respond(HttpStatusCode.InternalServerError, "saving error")
@@ -145,9 +145,9 @@ fun orderProblem(params: CreateOrderParams): String? = when {
 ```kotlin
 class CreateOrderUseCaseTest {
     private val orders = FakeOrderRepository()
-    private val stock = FakeAllocateStock(result = Result.success(emptyList()))
+    private val inventory = FakeAllocateInventory(result = Result.success(emptyList()))
     private val audit = RecordingLogEvent()
-    private val useCase = CreateOrderUseCase(AlwaysAllowed, orders, stock, NoopTransactionManager, FakeStockSync(), audit)
+    private val useCase = CreateOrderUseCase(AlwaysAllowed, orders, stock, NoopTransactionManager, FakeInventorySync(), audit)
 
     @Test
     fun `creates the order and logs the event`() = runTest {
@@ -160,12 +160,12 @@ class CreateOrderUseCaseTest {
 
     @Test
     fun `a stock refusal leaves nothing behind`() = runTest {
-        stock.result = Result.failure(AllocateStockUseCase.Error.NotEnoughStock)
+        inventory.result = Result.failure(AllocateInventoryUseCase.Error.NotEnoughInventory)
 
         val result = useCase(CreateOrderUseCase.Params(anOrder(), "ws-1", "u-1"))
 
-        assertEquals(AllocateStockUseCase.Error.NotEnoughStock, result.exceptionOrNull())
-        assertTrue(orders.saved.isEmpty(), "the order was saved although stock was refused")
+        assertEquals(AllocateInventoryUseCase.Error.NotEnoughInventory, result.exceptionOrNull())
+        assertTrue(orders.saved.isEmpty(), "the order was saved although inventory was refused")
         assertTrue(audit.events.isEmpty(), "an event was logged for an order that does not exist")
     }
 

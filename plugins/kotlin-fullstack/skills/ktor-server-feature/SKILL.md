@@ -63,7 +63,7 @@ fun interface UseCase<in P, out T> { suspend operator fun invoke(params: P): Res
 class CreateOrderUseCase(
     private val canCreate: CanCreateOrderUseCase,          // a use case may call use cases
     private val orders: OrderRepository,
-    private val stock: AllocateStockUseCase,
+    private val stock: AllocateInventoryUseCase,
     private val transactions: TransactionManager,
     private val audit: LogEventUseCase,
 ) : UseCase<CreateOrderUseCase.Params, Order> {
@@ -72,7 +72,7 @@ class CreateOrderUseCase(
         if (canCreate(CanCreateOrderUseCase.Params(params.workspaceId)).getOrThrow() is PlanCheck.Denied) throw Error.LimitReached
 
         val id = transactions.withTransaction {
-            val usage = stock(AllocateStockUseCase.Params(params.order.items, params.workspaceId)).getOrThrow()
+            val usage = inventory(AllocateInventoryUseCase.Params(params.order.items, params.workspaceId)).getOrThrow()
             orders.save(params.order, usage, params.workspaceId)
         } ?: throw CommonError.SaveFailure
 
@@ -105,7 +105,7 @@ class CreateOrderUseCase(
 
 Validation comes in two shapes and both are used: a **pure function** for input shape
 (`fun orderProblem(params): String?`, returns the text to show, tested at each boundary), and
-**typed use-case errors** for business rules that need data (`LimitReached`, `NotEnoughStock`).
+**typed use-case errors** for business rules that need data (`LimitReached`, `NotEnoughInventory`).
 
 ## A route: mount, access, receive, use case, dispatch
 
@@ -130,7 +130,7 @@ fun Route.ordersRouting() {
                 .onFailure { error ->
                     when (error) {
                         CreateOrderUseCase.Error.LimitReached -> call.respond(HttpStatusCode.BadRequest, LIMIT_REACHED)
-                        is AllocateStockUseCase.Error -> dispatchStockError(error)   // one dispatcher per error family
+                        is AllocateInventoryUseCase.Error -> dispatchInventoryError(error)   // one dispatcher per error family
                         CommonError.SaveFailure -> call.respond(HttpStatusCode.InternalServerError, "saving error")
                         else -> throw error                                         // StatusPages: report + 500
                     }
@@ -154,7 +154,7 @@ Rules paid for with real defects:
   but one of them, consistently); different answers reveal which ids exist.
 - **A typed error the route does not know is rethrown**, not swallowed into a generic `400`:
   swallowing turns a bug into a client error and hides it from the reporter.
-- **Route-family error dispatchers** (`dispatchStockError`) live next to the use cases whose
+- **Route-family error dispatchers** (`dispatchInventoryError`) live next to the use cases whose
   errors they map, and every `when` over a sealed error is exhaustive without `else` except for
   the rethrow.
 - **The reporter sees failures the route dispatches too** when they are unexpected (`SaveFailure`
@@ -254,7 +254,7 @@ fun Application.configureStatusPages(reporter: ErrorReporter) {
 interface OrderRepository {
     suspend fun getById(id: String, workspaceId: String): Order?
     suspend fun page(workspaceId: String, filter: OrderFilter, sorting: OrderSorting, page: Int, pageSize: Int): Page<Order>
-    suspend fun save(order: CreateOrderParams, usage: List<StockUsage>, workspaceId: String): String?
+    suspend fun save(order: CreateOrderParams, usage: List<InventoryUsage>, workspaceId: String): String?
     suspend fun softDelete(id: String, workspaceId: String): Boolean
 }
 

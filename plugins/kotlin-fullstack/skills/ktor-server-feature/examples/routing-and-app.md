@@ -425,8 +425,8 @@ fun interface ErrorReporter {
 fun Application.module() {
     // … plugins, Koin, auth, routing …
     val indexes = get<IndexesScope>()
-    val outbox = get<StockSyncOutboxWorker>()
-    val expiry = get<ReserveExpiryWorker>()
+    val outbox = get<InventorySyncOutboxWorker>()
+    val expiry = get<HoldExpiryWorker>()
 
     monitor.subscribe(ApplicationStarted) {
         indexes.launch { migrate(get()) }   // idempotent; survives restarts and several replicas

@@ -230,7 +230,7 @@ fun mongknStorageModule(mongoConfig: MongoConfig): Module = module {
 interface OrderRepository {
     suspend fun getById(id: String, workspaceId: String): Order?
     suspend fun page(workspaceId: String, filter: OrderFilter, sorting: OrderSorting, page: Int, pageSize: Int): Page<Order>
-    suspend fun save(order: CreateOrderParams, usage: List<StockUsage>, workspaceId: String): String?
+    suspend fun save(order: CreateOrderParams, usage: List<InventoryUsage>, workspaceId: String): String?
     suspend fun softDelete(id: String, workspaceId: String): Boolean
     suspend fun count(workspaceId: String): Long
 }

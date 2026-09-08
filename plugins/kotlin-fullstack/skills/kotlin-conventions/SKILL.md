@@ -28,12 +28,12 @@ and, if the repository keeps a conventions file, record it there in the same cha
 | storage port | `<Noun>Repository` (interface, in common) | `UserRepository`, `TokenRepository` | domain vocabulary, no driver |
 | storage implementation | `<Driver><Noun>Repository` when there is more than one driver; `<Noun>RepositoryImpl` when there is one | `MongoUserRepository`, `MongknUserRepository`, `Sqlx4kUserRepository`; `OrdersRepositoryImpl` | two drivers means two implementations; `Impl` would not say which |
 | use case (server) | `<Verb><Noun>UseCase : UseCase<Params, R>` with nested `class Params` and nested `sealed class Error`; feature-wide `CommonError` | `CreateOrderUseCase.Params`, `CreateOrderUseCase.Error.LimitReached`, `CommonError.SaveFailure` | the route dispatches errors by type, never by message |
-| error dispatcher | `suspend fun RoutingContext.dispatch<Family>Error(error)` next to the use cases it maps | `dispatchStockError` | one mapping per error family, shared by every route that can hit it |
+| error dispatcher | `suspend fun RoutingContext.dispatch<Family>Error(error)` next to the use cases it maps | `dispatchInventoryError` | one mapping per error family, shared by every route that can hit it |
 | access helper | `withAccess(min) { (user, tenantId) -> }`, `withUser { }`; tenant header read raw only under a role-gated mount | `withAccess(min = Role.MANAGER)` | the tier is visible at the call site |
 | role gate | `withRole(...) { }` / `withAnyRole(...) { }` as route-scoped plugins | | a gate is a mount, not an `if` |
 | transaction port | `TransactionManager.withTransaction { }`; `NoopTransactionManager` for tests | | no handle in the signature; the carrier is in the coroutine context |
 | ports for cross-cutting effects | `fun interface <Noun>Reporter` / `<Noun>Notifier` with `Logging` / `Noop` companions | `ErrorReporter.Logging`, `ErrorReporter.Noop` | a dependency, substitutable; `expect` is not |
-| workers | `<Noun>Worker` / `<Noun>Scheduler` with `start()` / `stop()`, registered with an explicit lambda | `StockSyncOutboxWorker` | intervals are defaulted parameters |
+| workers | `<Noun>Worker` / `<Noun>Scheduler` with `start()` / `stop()`, registered with an explicit lambda | `InventorySyncOutboxWorker` | intervals are defaulted parameters |
 | single-method port | `fun interface <Question>` | `StorageHealth { isReachable() }` | the only common thing between two drivers is the question |
 | routing | `fun Routing.<subject>Routing()` in `<Subject>Routing.kt` | `transactionRouting()` | one function per subject, assembled in one place |
 | validation | `fun <subject>Problem(x): String?` in `Rules.kt` | `transactionProblem`, `credentialsProblem` | returns the problem or null; no exception vocabulary |

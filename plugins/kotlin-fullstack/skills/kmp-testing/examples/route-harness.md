@@ -210,7 +210,7 @@ fun Application.configureTestAuth() {
     }
 }
 
-const val WORKSPACE = "689f7ea7ccc0849799f69ad5"
+const val WORKSPACE = "64a1b2c3d4e5f60718293a4b"
 val token: String = JWT.create().withClaim("azp", "orders-web").withClaim("email", "owner@example.test").sign(Algorithm.HMAC256("test"))
 
 /** The caller of every test: an owner of the test workspace. Override with a lower role to test a gate. */
