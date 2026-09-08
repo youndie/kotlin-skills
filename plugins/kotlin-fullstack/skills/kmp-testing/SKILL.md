@@ -157,6 +157,28 @@ On native the database runs alongside; each run works in its own database
 (`uniqueDatabaseName`) and drops it afterwards. A negative result needs a positive control: after
 asserting something is absent, assert something that proves you looked in the right place.
 
+Three traps from services with more history:
+
+- **The database address on native comes from the environment**, never a hardcoded port. A
+  hardcoded `127.0.0.1:27017` on a shared runner was somebody else's container: while it ran the
+  suite was green, when it stopped every test failed on a server-selection timeout, and no code
+  change had anything to do with it. CI starts its own database and hands the port over; the
+  default stays for a local `docker run`.
+- **`runBlocking`, not `runTest`, for a real database on native.** Inside `runTest` time is
+  virtual, and a driver that bounds its wait with a timeout in the caller's context sees the
+  deadline fire instantly while the database is still answering. On the JVM the same code steps
+  onto `Dispatchers.IO` and lands in real time, which is why only the native run failed.
+- **SQLite tests use a file, not `:memory:`**, deleted before opening: an in-memory database
+  belongs to the connection that opened it, and a pool hands out more than one, so migrations
+  land in one connection's database and queries go to another, empty one ("no such table").
+
+**Route tests on a service with use cases** swap the use case for a fake (or a mock in a JVM-only
+suite) through an override module and stub the token verifier; the harness's client sets the
+tenant header and the bearer by default. What is worth a test per route: the happy status, each
+typed error's status, and **the tier**: the same route mounted for a role below `min` answers
+`403` (an override module that grants a lower role makes that a one-liner). A route reached
+without the header must answer `400`, not `500`.
+
 ## Two builds mean two checks
 
 > **Shared code is tested once. Code with two implementations is tested twice.**
@@ -260,7 +282,12 @@ reference.
 
 ## The Koin graph
 
-A missing binding is otherwise found not by a test but by a black screen. Three traps:
+A missing binding is otherwise found not by a test but by a black screen on the client, and on
+the server by a `500` on **one** route while the pod starts healthy and `/health` stays green:
+Koin creates a `single` on first use, so a use case whose constructor has a defaulted clock
+parameter registered with `singleOf` fails at the first sign-in, not at start-up. The test that
+closes that gap **resolves** every type the routes inject, and its list is maintained by hand:
+it is exactly as useful as the list is complete. Three traps:
 
 1. `verify()` walks only the modules you list; view models registered inside components via
    `rememberKoinModules` never reach it and are added to the check by hand.
@@ -268,8 +295,9 @@ A missing binding is otherwise found not by a test but by a black screen. Three 
    to the container, and the last registration wins for everybody. The fix is a concrete
    interface per aggregate; if a generic binding must exist, bind it by name and keep a test
    that the unnamed binding does not come back.
-3. `verify()` skips constructor parameters with defaults; only resolving by type
-   (`koinApplication { modules(...) }.koin.get<T>()`) sees them. On the server, resolve every port
+3. `verify()` skips constructor parameters with defaults **and nullable ones** (it treats them
+   as optional and never looks for a binding); only resolving by type
+   (`koinApplication { modules(...) }.koin.get<T>()`) sees them. Proven by reintroducing the bug. On the server, resolve every port
    in each build's test (creation is stricter than reflection); on native use `checkModules()`.
 
 ## Running

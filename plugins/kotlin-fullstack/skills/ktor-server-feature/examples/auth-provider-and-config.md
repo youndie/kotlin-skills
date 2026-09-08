@@ -169,3 +169,95 @@ actual fun readEnv(name: String): String? = System.getenv(name)
 @OptIn(ExperimentalForeignApi::class)
 actual fun readEnv(name: String): String? = getenv(name)?.toKString()
 ```
+
+
+## Configuration, the other two shapes
+
+### Typed HOCON properties on a JVM-only service
+
+```kotlin
+// application.conf holds no values of its own: every field is a ${?ENV} substitution
+private fun Application.configModule() = module {
+    single<MongoConfig> { property<MongoConfig>("ktor.mongo") }
+    single<ServiceEndpoints> { property<ServiceEndpoints>("ktor.serviceEndpoints") }
+    single<ReservesConfig> { property<ReservesConfig>("ktor.reserves") }
+}
+```
+
+### ENV through a testable source, on a two-build service
+
+```kotlin
+/**
+ * Variable names must equal the ones application.conf used, to the letter: the chart already
+ * sets them, and both builds must read the same thing. Diverging names would mean switching the
+ * image silently changes configuration — the worst kind of rollback.
+ */
+class ServiceConfig(private val env: EnvSource = EnvSource.Process) {
+    val port: Int get() = env.intOrNull("PORT") ?: 8080
+    val environment: String get() = env.optional("ENVIRONMENT", "local")
+    val mongo: MongoConfig get() = MongoConfig(user = env.optional("MONGO_USER"), password = env.optional("MONGO_PASSWORD"), host = env.optional("MONGO_HOST"))
+
+    /** Required: it signs the handoff token. The service never started without it, and it must not start now. */
+    val handoff: HandoffConfig get() = HandoffConfig(secret = env.required("HANDOFF_SECRET"))
+
+    /** null when the key is unset: the gate is closed, and a local run sends nothing anywhere. */
+    val reporter: ReporterConfig? get() = env["REPORTER_KEY"]?.takeIf { it.isNotBlank() }?.let { ReporterConfig(it, env.optional("REPORTER_HOST", DEFAULT_HOST), environment) }
+
+    /** The running image's version: one value for /version, the deploy marker and the reporter's release. Read here, not inside the reporter config, or a disabled reporter also loses the version for everyone else. */
+    val release: String? get() = env.optional("APP_VERSION").ifBlank { null }
+
+    val corsExtraHosts: List<String> get() = env.optional("CORS_EXTRA_HOSTS").split(',').map { it.trim() }.filter { it.isNotEmpty() }
+}
+
+// in a test
+val config = ServiceConfig(EnvSource.of(mapOf("HANDOFF_SECRET" to "test", "MONGO_HOST" to "127.0.0.1:27017")))
+```
+
+### Secrets without defaults, validated in the constructor
+
+```kotlin
+data class ProviderConfig(
+    val issuer: String,
+    val publicPort: Int,
+    val managementPort: Int,
+    val masterKeys: List<String>,          // the first encrypts; the rest are accepted during a rotation
+    val bootstrapToken: String? = null,
+) {
+    /** When none is given, a random one for this run, generated HERE so every way of starting behaves the same. */
+    val effectiveBootstrapToken: String = bootstrapToken?.takeIf { it.isNotBlank() } ?: Secrets.generate()
+
+    init {
+        require(issuer.isNotBlank()) { "issuer is required" }
+        require(managementPort != publicPort) { "the management contour must live on a separate port, or it cannot be closed off" }
+        require(masterKeys.isNotEmpty() && masterKeys.none { it.isBlank() }) { "MASTER_KEYS is required: at least one non-empty key" }
+    }
+}
+
+private fun required(name: String): String = optional(name) ?: error(
+    "Environment variable $name is required. Secrets deliberately have no defaults: " +
+        "a default for a secret is a way to reach production with a default secret.",
+)
+```
+
+## A test-only auth shim, kept in production code and fenced
+
+```kotlin
+/**
+ * Lets automation act as an existing user without OAuth — ONLY on the test environment.
+ * Active only when ENVIRONMENT == "test" AND a secret is configured (production has none, so the
+ * shim is off entirely); every request carries the secret in a header, compared in constant time;
+ * the user is an existing id, resolved by lookup — no creation, no call to another service.
+ */
+data class TestAuthConfig(val enabled: Boolean, val secret: String)
+
+fun ApplicationRequest.testShimUserId(config: TestAuthConfig): String? {
+    if (!config.enabled) return null
+    val provided = header("X-Test-Secret") ?: return null
+    if (!constantTimeEquals(provided, config.secret)) return null
+    return header("X-Test-User")?.takeIf { it.isNotBlank() }
+}
+```
+
+With the shim, `authenticate(JWT, optional = testAuthConfig.enabled)` lets a request without a
+bearer reach the access helper, where the shim resolves the user; on production `optional` is
+false and nothing changes.

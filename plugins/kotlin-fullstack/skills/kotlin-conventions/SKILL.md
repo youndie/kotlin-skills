@@ -26,7 +26,14 @@ and, if the repository keeps a conventions file, record it there in the same cha
 | stored shape, server-common | `<Noun>Record` | `TransactionRecord` (adds `userId`) | server-side notion, not the contract |
 | stored shape, per driver | `<Noun>Db` | `TransactionDb`, `UserDb` | the driver's types live here only |
 | storage port | `<Noun>Repository` (interface, in common) | `UserRepository`, `TokenRepository` | domain vocabulary, no driver |
-| storage implementation | `<Technology><Noun>Repository` | `MongoUserRepository`, `MongknUserRepository` | two builds means two implementations; `Impl` would not say which |
+| storage implementation | `<Driver><Noun>Repository` when there is more than one driver; `<Noun>RepositoryImpl` when there is one | `MongoUserRepository`, `MongknUserRepository`, `Sqlx4kUserRepository`; `OrdersRepositoryImpl` | two drivers means two implementations; `Impl` would not say which |
+| use case (server) | `<Verb><Noun>UseCase : UseCase<Params, R>` with nested `class Params` and nested `sealed class Error`; feature-wide `CommonError` | `CreateOrderUseCase.Params`, `CreateOrderUseCase.Error.LimitReached`, `CommonError.SaveFailure` | the route dispatches errors by type, never by message |
+| error dispatcher | `suspend fun RoutingContext.dispatch<Family>Error(error)` next to the use cases it maps | `dispatchStockError` | one mapping per error family, shared by every route that can hit it |
+| access helper | `withAccess(min) { (user, tenantId) -> }`, `withUser { }`; tenant header read raw only under a role-gated mount | `withAccess(min = Role.MANAGER)` | the tier is visible at the call site |
+| role gate | `withRole(...) { }` / `withAnyRole(...) { }` as route-scoped plugins | | a gate is a mount, not an `if` |
+| transaction port | `TransactionManager.withTransaction { }`; `NoopTransactionManager` for tests | | no handle in the signature; the carrier is in the coroutine context |
+| ports for cross-cutting effects | `fun interface <Noun>Reporter` / `<Noun>Notifier` with `Logging` / `Noop` companions | `ErrorReporter.Logging`, `ErrorReporter.Noop` | a dependency, substitutable; `expect` is not |
+| workers | `<Noun>Worker` / `<Noun>Scheduler` with `start()` / `stop()`, registered with an explicit lambda | `StockSyncOutboxWorker` | intervals are defaulted parameters |
 | single-method port | `fun interface <Question>` | `StorageHealth { isReachable() }` | the only common thing between two drivers is the question |
 | routing | `fun Routing.<subject>Routing()` in `<Subject>Routing.kt` | `transactionRouting()` | one function per subject, assembled in one place |
 | validation | `fun <subject>Problem(x): String?` in `Rules.kt` | `transactionProblem`, `credentialsProblem` | returns the problem or null; no exception vocabulary |
@@ -92,6 +99,10 @@ implementation and no test seam is a class.
 implementations the compiler checks for signature and never for behaviour. Count the pairs; be
 able to say what each one's platform API is (`getenv`, `SharedPreferences`, `window.location`,
 the entry point). Token signing, hashing, validation, routing and configuration are common.
+**A dependency is an interface in DI, not an `expect`**: an error reporter, a notifier, a clock.
+`expect` gives exactly one implementation per platform and nothing to substitute in a test; a
+`fun interface` with `Logging` and `Noop` companions gives both, and when the JVM-only library
+behind it grows a native build, one line in the native module changes.
 
 **A base class is earned by two concrete classes sharing behaviour that goes wrong when
 copied**, and it must not own the state. Two shapes that look like reuse and are not:
@@ -141,6 +152,10 @@ constructs it in code. A decision about a value is a named function of that valu
 - Transport exceptions become a domain `AppError` **once**, at the repository; nothing above the
   data layer imports the HTTP client. The UI maps `AppError` to `UiText`; `throwable.message` is
   a library's English or null.
+- On the server, a use case throws **typed** errors inside `suspendRunCatching` (a nested
+  `sealed class Error`, `data object` cases) and the route dispatches them with an exhaustive
+  `when` that rethrows the unknown; matching on `message` and a generic `400` for everything are
+  the two ways a bug becomes a client error and disappears from the reporter.
 - Never nest `Result` in `Result`; never give a `UseCase` base a `get()` that rethrows (the
   callers bypass `Result` and the failure path goes untested); never hardcode a dispatcher in a
   use-case base (untestable, and I/O belongs to the repository that does it).
@@ -222,6 +237,10 @@ above. Then read for:
 - [ ] a base state, a base view model, or a generic CRUD repository over a marker interface
 - [ ] a `Flow<Result<T>>`; a `UseCase` base with a rethrowing `get()`; a hardcoded dispatcher in a base
 - [ ] `state.value =` in more than one place of a view model; a `success` or `loggedOut` flag in a state
+- [ ] a route reading the tenant from the body, or a repository method without the tenant in its signature
+- [ ] a `when` over use-case errors that swallows unknown ones into a `400`; a match on `error.message`
+- [ ] a role compared by `ordinal`; a refusal log that prints a token
+- [ ] an `expect` for something a test would want to substitute
 - [ ] a string path or a copied DTO outside the contract module
 - [ ] `org.junit` imports; a mocking library in a shared suite
 - [ ] `runCatching` in suspend code; `catch (e: Exception)` without a cancellation rethrow above

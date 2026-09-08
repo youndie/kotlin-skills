@@ -222,3 +222,118 @@ fun mongknStorageModule(mongoConfig: MongoConfig): Module = module {
     single { MongknCategoryRepository(get()) }.bind<CategoryRepository>()
 }
 ```
+
+
+## The tenant in every signature, and the transaction as a port
+
+```kotlin
+interface OrderRepository {
+    suspend fun getById(id: String, workspaceId: String): Order?
+    suspend fun page(workspaceId: String, filter: OrderFilter, sorting: OrderSorting, page: Int, pageSize: Int): Page<Order>
+    suspend fun save(order: CreateOrderParams, usage: List<StockUsage>, workspaceId: String): String?
+    suspend fun softDelete(id: String, workspaceId: String): Boolean
+    suspend fun count(workspaceId: String): Long
+}
+
+class MongoOrderRepository(database: MongoDatabase) : OrderRepository {
+    private val collection = database.getCollection<OrderDb>("orders")
+
+    override suspend fun getById(id: String, workspaceId: String): Order? =
+        collection.find(Filters.and(Filters.eq("_id", ObjectId(id)), Filters.eq(OrderDb::workspaceId.name, ObjectId(workspaceId))))
+            .firstOrNull()?.toDomain()
+
+    override suspend fun softDelete(id: String, workspaceId: String): Boolean =
+        collection.updateOne(
+            Filters.and(Filters.eq("_id", ObjectId(id)), Filters.eq(OrderDb::workspaceId.name, ObjectId(workspaceId))),
+            Updates.set(OrderDb::deleted.name, true),
+        ).modifiedCount > 0
+}
+```
+
+```kotlin
+/**
+ * The transaction port. The domain writes withTransaction { } and receives no handle: the carrier
+ * travels in the CoroutineContext on the adapter's side. It lives with the ports, not in one
+ * module with its Mongo implementation.
+ */
+interface TransactionManager {
+    suspend fun <T> withTransaction(block: suspend () -> T): T
+}
+
+/** For builds and tests whose storage needs none. */
+object NoopTransactionManager : TransactionManager {
+    override suspend fun <T> withTransaction(block: suspend () -> T): T = block()
+}
+
+// Mongo adapter: a client session in the coroutine context; repositories read it from there.
+class MongoTransactionManager(private val client: MongoClient) : TransactionManager {
+    override suspend fun <T> withTransaction(block: suspend () -> T): T {
+        currentCoroutineContext()[MongoSessionContext]?.let { return block() }      // nested: join
+        return client.startSession().use { session ->
+            session.startTransaction()
+            try {
+                withContext(MongoSessionContext(session)) { block() }.also { session.commitTransaction() }
+            } catch (e: Throwable) {
+                session.abortTransaction(); throw e
+            }
+        }
+    }
+}
+
+// SQL adapter over an async driver: the library joins an open transaction or starts one.
+class SqlTransactionManager(private val db: Driver) : TransactionManager {
+    override suspend fun <T> withTransaction(block: suspend () -> T): T = TransactionContext.withCurrent(db) { block() }
+}
+```
+
+## The SQL variant (sqlx4k, one repository for two databases)
+
+```kotlin
+private const val USER_COLUMNS = "tenant_id, id, email, name, email_verified, enabled"
+
+class SqlUserRepository(private val db: Driver) : UserRepository {
+    override suspend fun find(tenantId: TenantId, id: String): User? =
+        db.query(sql("select $USER_COLUMNS from users where tenant_id = :tenant and id = :id")
+            .bind("tenant", tenantId.value).bind("id", id))
+            .firstOrNull()?.let { toUser(it, identitiesOf(tenantId, id)) }
+
+    /** Identities are replaced wholesale on save: a save describes a state rather than adding to it. */
+    override suspend fun upsert(user: User) {
+        db.exec(sql("insert into users (…) values (…) on conflict (tenant_id, id) do update set email = excluded.email, …")
+            .bind("tenant", user.tenantId.value).bind("id", user.id) /* … */)
+        db.exec(sql("delete from user_identities where tenant_id = :tenant and user_id = :user").bind("tenant", user.tenantId.value).bind("user", user.id))
+        user.identities.forEach { db.exec(sql("insert into user_identities (…) values (…)") /* … */) }
+    }
+}
+
+/** The ports, with no driver among them: a second storage brings a driver and a schema, not this list again. */
+fun sqlPorts(): Module = module {
+    single<StorageHealth> { SqlStorageHealth(get()) }
+    single<UserRepository> { SqlUserRepository(get()) }
+    single<TransactionManager> { SqlTransactionManager(get()) }
+    // …
+}
+```
+
+Two storage modules for two databases (Postgres, SQLite) share `sqlPorts()` and the SQL both
+understand; each brings its driver and its schema. A native binary that links **two** drivers
+fails at the linker on duplicate symbols, so a distribution depends on one. What the second
+database's tests check is not that a query is right but that **the driver answers the same way**:
+a boolean read back as a boolean, a blob byte for byte, an upsert that updates, a `NULL` timestamp
+that stays absent instead of becoming 1970.
+
+## Migrations and indexes at start-up
+
+- Run from the application's lifecycle (`ApplicationStarted`), from a scope cancelled on
+  `ApplicationStopping`; idempotent, so several replicas and restarts are fine.
+- On Postgres, under an advisory lock (a rollout starts the second pod before stopping the first);
+  on SQLite unlocked, because a second pod cannot exist. Do not nest a `runBlocking` inside the
+  transaction that holds the lock: it blocks the thread the lock is waiting on.
+- **Read migration files as a stream.** A driver helper that asks for a buffer of
+  `Int.MAX_VALUE` per file turned a 7 KB file into a 2 GB request on native, and a pod with a
+  256 MiB limit died the second it started; the spike is invisible to a `kubectl top` taken after.
+- **Do not seed from `init { launch }` of a repository.** A detached coroutine outlives its
+  creator (in tests it reached a closed client) and races the first requests. Seed explicitly at
+  start-up, `if (collection.countDocuments() == 0L)`.
+- A `Migrate.kt` hook that exists but is empty is a promise the schema does not keep; check it is
+  populated before assuming a schema change migrates itself.

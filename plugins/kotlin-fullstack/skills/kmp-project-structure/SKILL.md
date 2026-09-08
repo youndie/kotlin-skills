@@ -61,6 +61,23 @@ Why each boundary exists:
 A single-target project (JVM server only, Android only) keeps the same package shape inside fewer
 modules; the boundaries above are worth drawing the day a second target appears, not before.
 
+**A server that ships as a library** (an identity provider, a platform component other services
+embed) cuts further, and the cut follows the same rule, "a module per thing that can vary":
+
+| Module | What it is |
+|---|---|
+| `:core` | domain: models, the storage **ports** (`port/`), `TransactionManager`, use cases by feature, the DI modules that bind them; no driver, no HTTP |
+| `:crypto`, `:shared-*` | pure libraries the core depends on, and the contracts consumers import |
+| `:storage-<driver>-core`, `:storage-<driver>-<db>` | the repositories written against one driver, and one thin module per database bringing its driver and its schema; a native binary cannot link two drivers |
+| `:server` | the Ktor surface: routes, plugins, the two engines; it knows `:core` and nothing about drivers |
+| `:server-boot` | the composition root function (`runService(storage = …, authMethods = …)`) and the environment reading |
+| `:auth-<method>` | optional capabilities as modules: present on the classpath means available, absent means impossible |
+| `:distribution-*` | one `Main.kt` and one dependency list each; the dependency list **is** the feature set |
+| `:cli`, `:client` | consumers of the shared contracts, built in the same repository so they cannot drift |
+
+The property this buys: a capability that is not in the distribution's dependency list cannot be
+switched on by any configuration, because the code is not in the binary.
+
 ## The one rule that shapes the source sets
 
 **Everything that is not bound to a platform API lives in `commonMain`.** Every `expect/actual`

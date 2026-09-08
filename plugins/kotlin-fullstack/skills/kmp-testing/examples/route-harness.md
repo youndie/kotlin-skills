@@ -195,3 +195,126 @@ class DiNativeTest {
     }
 }
 ```
+
+
+## A harness for a service with use cases, roles and a tenant header
+
+```kotlin
+/** A stub verifier: any HS256 token signed with "test" is accepted; the principal is built from its claims. */
+fun Application.configureTestAuth() {
+    install(Authentication) {
+        jwt(JWT_AUTH) {
+            verifier { JWT.require(Algorithm.HMAC256("test")).build() }
+            validate { credential -> OidcPrincipal(JWTPrincipal(credential.payload), azp = "orders-web", email = "owner@example.test", roles = emptySet()) }
+        }
+    }
+}
+
+const val WORKSPACE = "689f7ea7ccc0849799f69ad5"
+val token: String = JWT.create().withClaim("azp", "orders-web").withClaim("email", "owner@example.test").sign(Algorithm.HMAC256("test"))
+
+/** The caller of every test: an owner of the test workspace. Override with a lower role to test a gate. */
+fun authModuleWithRole(role: Role = Role.OWNER) = module {
+    single<GetOrCreateUserUseCase> {
+        FakeGetOrCreateUser(User(id = "u-1", roles = listOf(WorkspaceRole(WORKSPACE, role))))
+    }
+}
+
+fun ApplicationTestBuilder.createTestClient() = createClient {
+    install(Resources)
+    install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true }) }
+    defaultRequest {
+        url.encodedPath = "/api/orders-app/"
+        contentType(ContentType.Application.Json)
+        header(HttpHeaders.Authorization, "Bearer $token")
+        if (headers["X-Workspace-Id"] == null) header("X-Workspace-Id", WORKSPACE)
+    }
+}
+
+fun Application.configureTestApplication(modules: List<Module>) {
+    configureTestAuth()
+    install(Koin) { modules(modules) }
+    configurePlugins()
+    configureRouting()
+}
+```
+
+```kotlin
+class OrdersRoutePostTest {
+    @Test
+    fun `an order is created`() = testApplication {
+        client = createTestClient()
+        val useCase = FakeCreateOrder(result = Result.success(anOrder()))
+        application { configureTestApplication(listOf(module { single<CreateOrderUseCase> { useCase } }, authModuleWithRole())) }
+
+        val response = client.post(OrdersResource()) { setBody(anOrderParams()) }
+
+        assertEquals(HttpStatusCode.Created, response.status)
+        assertEquals(WORKSPACE, useCase.lastParams?.workspaceId, "the tenant did not reach the use case from the header")
+    }
+
+    /** The gate: a viewer cannot create. The route is the same; the role module differs. */
+    @Test
+    fun `a viewer is refused`() = testApplication {
+        client = createTestClient()
+        application { configureTestApplication(listOf(module { single<CreateOrderUseCase> { FakeCreateOrder() } }, authModuleWithRole(Role.VIEWER))) }
+
+        assertEquals(HttpStatusCode.Forbidden, client.post(OrdersResource()) { setBody(anOrderParams()) }.status)
+    }
+
+    @Test
+    fun `a limit refusal is a 400 with the limit text`() = testApplication {
+        client = createTestClient()
+        val useCase = FakeCreateOrder(result = Result.failure(CreateOrderUseCase.Error.LimitReached))
+        application { configureTestApplication(listOf(module { single<CreateOrderUseCase> { useCase } }, authModuleWithRole())) }
+
+        val response = client.post(OrdersResource()) { setBody(anOrderParams()) }
+
+        assertEquals(HttpStatusCode.BadRequest, response.status)
+        assertEquals(ORDER_LIMIT_REACHED, response.bodyAsText())
+    }
+}
+```
+
+## A real database per test class (JVM) and a URL from the environment (native)
+
+```kotlin
+@TestInstance(TestInstance.Lifecycle.PER_CLASS)
+abstract class BaseMongoRepositoryTest {
+    private lateinit var running: TransitionWalker.ReachedState<RunningMongodProcess>
+    protected lateinit var client: MongoClient
+    protected abstract val collectionName: String
+    protected val db get() = client.getDatabase("test")
+
+    @BeforeAll fun startMongo() {
+        running = Mongod.instance().start(Version.V8_0_3)
+        client = MongoClient.create("mongodb://${running.current().serverAddress}")
+        runBlocking { db.createCollection(collectionName) }
+    }
+
+    @AfterAll fun stopMongo() { running.close(); client.close() }
+}
+```
+
+```kotlin
+// linuxX64Test — the address is the environment's, with a default for a local docker run
+val mongoTestUrl: String = readEnv("TEST_MONGO_URL") ?: "mongodb://127.0.0.1:27017"
+
+class MongknOrderRepositoryTest {
+    @Test
+    fun `update upserts on the first call and replaces on the second`() = runBlocking {   // runBlocking: real time
+        MongoClient(mongoTestUrl).use { client ->
+            val db = client.getDatabase("orders_test")
+            db.getCollection("orders").drop()
+            val repository = MongknOrderRepository(db)
+
+            repository.update(anOrder(id = ID, comment = "first"))
+            repository.update(anOrder(id = ID, comment = "second"))
+
+            assertEquals("second", repository.getById(ID, WORKSPACE)?.comment)
+            assertEquals(1L, db.getCollection("orders").countDocuments(), "one document, not two")
+            db.getCollection("orders").drop()
+        }
+    }
+}
+```
