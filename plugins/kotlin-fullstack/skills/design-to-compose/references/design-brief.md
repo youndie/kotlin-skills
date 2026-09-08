@@ -21,8 +21,8 @@ person exporting anything, and a screen the code can be measured against.
 > 3. **Static**: plain markup with inline styles. No `{{ holes }}`, no `<sc-for>` / `<sc-if>`,
 >    no `<dc-import>`, no tweaks. Repeated items (list rows) are written out, with the sample
 >    data below.
-> 4. **The app's font**: `<family>` via a Google Fonts `<link>` in the artboard head (or the
->    embedded face the app ships). Not `system-ui`, not the browser default.
+> 4. **The app's font**: `<family>` via a Google Fonts `<link>` inside the artboard's `<helmet>`
+>    (or the embedded face the app ships). Not `system-ui`, not the browser default.
 > 5. **Exact values from the design system**: colours, type sizes and weights, line heights,
 >    radii, spacing and control heights as they are in `<tokens>`; a value that is not in the
 >    system is called out in a note on the canvas, not invented silently.
@@ -32,6 +32,9 @@ person exporting anything, and a screen the code can be measured against.
 > 8. **One canvas page per screen**, artboards in a row in state order, notes beside them for
 >    anything the code has to know that the picture does not say (what a tap does, what
 >    scrolls).
+> 9. **Hand over the files**, not only the link: the `.dc.html` artboards with `canvas.json`
+>    and any images, as a directory — unless the canvas was published from Claude Code and is
+>    owned by the person who will implement it, in which case the link is enough.
 
 ## Why each line
 
@@ -54,8 +57,12 @@ person exporting anything, and a screen the code can be measured against.
    shows different names or a different date, the diff is red where nothing is wrong.
 7. **No chrome** — the app draws none of it, so it would be a guaranteed mismatch band at the
    top of every screen.
-8. **Pages and notes** — one page per screen keeps `--only "Checkout*"` meaningful and the
-   canvas navigable; notes are the only place behaviour lives in a static design.
+8. **Pages and notes** — one page per screen keeps the canvas navigable (the `<Screen>_` prefix
+   in the names is what `--only "Checkout*"` selects on); notes are the only place behaviour
+   lives in a static design.
+9. **The files** — a canvas shared from claude.ai/design keeps its content where the reference
+   renderer cannot read it, and a shared artifact reads back as a summary; the directory of
+   artboards is what the renderer consumes, and it is what a Save keeps anyway.
 
 ## What comes back
 

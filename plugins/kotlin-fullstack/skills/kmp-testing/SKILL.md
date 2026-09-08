@@ -288,12 +288,16 @@ names would collapse into one file). Anything drawn from the clock takes `today`
 or the golden lives until midnight. A chart that resolves a view model is substituted with a
 ready-made state through a parameter.
 
-**Record and verify on one operating system.** The same code renders text differently on macOS
-and Linux by 1–4 % of the pixels, past any tolerance worth keeping; a golden that reproduces on
-one OS does not belong in a merge gate, so the comparison is a separate task, not part of
-`test`. Keep the tolerance strict (0.01 % of pixels, zero per channel): a colour change once
-slipped through a looser one. **Look at the goldens after recording**, or a bug becomes the
-reference.
+**Bundle the font, or record and verify on one operating system.** Text drawn in a host font
+renders differently on macOS and Linux by 1–4 % of the pixels, past any tolerance worth
+keeping. viddik makes goldens portable once the fixture's theme bundles a face —
+`viddikTypography()` or the project's own font through `normalizeVerticalMetrics()` — and its
+own suite verifies on three operating systems that way; a project that has not done that has
+host-specific goldens, and those do not belong in a merge gate, which is why the comparison is
+a separate task from `test`. Keep the tolerance strict (viddik's default is 0.05 % of pixels
+with a ±2 channel allowance; a colour change once slipped through a looser one). **Look at the
+goldens after recording**, or a bug becomes the reference. The gap between a screen and the
+design it was built to is a different comparison with its own tolerance: `design-to-compose`.
 
 ## The Koin graph
 

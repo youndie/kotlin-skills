@@ -81,6 +81,9 @@ function logicWarnings(source) {
   return out
 }
 
+/** An image uploaded to the canvas as an asset lives outside the page; standalone it is a broken image. */
+function blobReferences(source) { return (source.match(/_blob\/[A-Za-z0-9_-]+/g) || []).length }
+
 /** A `.dc.html` as a document a browser renders on its own: runtime hook, wrappers and logic removed. */
 function standalone(source, w, h) {
   let html = source
@@ -164,6 +167,8 @@ for (const file of boards) {
   if (!sized) warnings.push('no size in canvas.json, rendered at ' + w + 'x' + h)
   const logic = logicWarnings(source)
   if (logic.length) warnings.push('not static (' + logic.join(', ') + '); the PNG shows the template, not the design')
+  const blobs = blobReferences(source)
+  if (blobs) warnings.push(blobs + ' _blob/ image reference(s) - uploaded assets are not in the page and render as broken images')
   const reference = referenceStem(stem)
   if (reference !== stem) warnings.push('stem sanitised to "' + reference + '" - name the fixture so that "<group>_<name>" gives exactly this')
 
