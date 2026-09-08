@@ -21,6 +21,26 @@
         "The report asks for a static version of the Data artboard or a hand export, and does not edit the artboard source",
         "The font in the artboard (system-ui) is flagged as not reproducible and a bundled family is requested"
       ]
+    },
+    {
+      "id": 2,
+      "name": "real-canvas-single-file-four-frames",
+      "prompt": "The designer's canvas for a food-kiosk app was exported from claude.ai/design as files into {fixture}/design (one .dc.html with four 1080x1920 frames inside it, plus the two runtime scripts it references). The Compose project it is for is {project} (read it for its theme and existing fixtures, but do not modify it). Produce the reference PNGs the screenshot parity task will compare against, into {fixture}/snapshots/design, and write the token table plus the artboard-to-fixture mapping into {fixture}/tokens.md. Do not write Kotlin. Where the canvas cannot give a usable reference, say exactly why and what to ask the designer for.",
+      "files": [],
+      "setup": "a real single-file canvas (design_doc_mode canvas, several frames in one .dc.html, <image-slot> custom elements, Google Fonts, template logic in one frame) and a project with a committed design/tokens.json to grade the token table against; not bundled - point {fixture} at your own export",
+      "expected_output": "One reference per frame at the frame's size, named like the project's existing fixtures, with the frame's border excluded; the frame with template logic and the empty image slots flagged; the token table agreeing with the project's tokens; the project untouched.",
+      "expectations": [
+        "The single file is recognised as several frames and one reference per frame is produced at 1080x1920, not one PNG of the whole page",
+        "The references are named like the project's existing fixtures (<group>_<name>.png as viddik would look them up)",
+        "The frame's 1px canvas border is excluded so the size matches the fixture exactly",
+        "The frame that carries template logic (sc-for, holes, DCLogic state) is flagged as not static and not presented as a drawn reference without saying so",
+        "Empty <image-slot> placeholders are flagged as areas that will always differ, with what to ask the designer for",
+        "The Google Fonts dependency (network at render time) and the fixture font are compared and the consequence for parity stated",
+        "The token table's colours are a subset of, or agree with, the project's committed tokens; canvas chrome colours are not presented as screen tokens",
+        "Screens the product has but the canvas does not are reported as missing references, not drawn by the agent",
+        "The project directory is not modified",
+        "No heavyweight tooling is installed to render (the skill's script or the project's own tools suffice)"
+      ]
     }
   ]
 }
