@@ -1,8 +1,10 @@
 {
   "name": "kotlin-fullstack",
-  "description": "Kotlin full-stack skills distilled from a real Kotlin Multiplatform product: project structure, shared wire contract, Ktor server (JVM + Kotlin/Native), Compose Multiplatform client, testing, and conventions.",
-  "version": "0.1.0",
-  "author": { "name": "youndie" },
+  "description": "Kotlin full-stack skills distilled from a real Kotlin Multiplatform product: project structure, shared wire contract, Ktor server (JVM + Kotlin/Native), Compose Multiplatform client, design-to-Compose parity with viddik, testing, and conventions.",
+  "version": "0.2.0",
+  "author": {
+    "name": "youndie"
+  },
   "repository": "https://github.com/youndie/kotlin-skills",
   "license": "MIT"
 }
