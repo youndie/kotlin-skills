@@ -1,0 +1,13 @@
+{
+  "name": "kotlin-skills",
+  "owner": {
+    "name": "youndie"
+  },
+  "plugins": [
+    {
+      "name": "kotlin-fullstack",
+      "source": "./plugins/kotlin-fullstack",
+      "description": "Skills for Kotlin full-stack work: KMP project layout, the shared wire contract, Ktor server features compiled to JVM and Kotlin/Native, Compose Multiplatform client features, testing across both, and naming and abstraction conventions."
+    }
+  ]
+}
