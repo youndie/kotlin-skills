@@ -23,6 +23,7 @@ documentation format and checks the briefs are shaped for.
 | Skill | Use it when |
 |---|---|
 | [`product-brief`](plugins/kotlin-fullstack/skills/product-brief/SKILL.md) | turning an idea or a feature request into a technical brief for docs-bootstrap and a designer brief that agree on every screen and state |
+| [`backlog-item`](plugins/kotlin-fullstack/skills/backlog-item/SKILL.md) | advancing a docs-bootstrap backlog one item per run, under `/loop`: pick by rule, implement with the matching skill, docs and status in the same PR |
 | [`kmp-project-structure`](plugins/kotlin-fullstack/skills/kmp-project-structure/SKILL.md) | starting a KMP project, adding a module or target, deciding where a class belongs, shaping packages |
 | [`kmp-shared-contract`](plugins/kotlin-fullstack/skills/kmp-shared-contract/SKILL.md) | adding or changing an endpoint or a DTO; anything about how the client and the server talk |
 | [`ktor-server-feature`](plugins/kotlin-fullstack/skills/ktor-server-feature/SKILL.md) | a route, a validation rule, a storage port and its per-build implementations, DI, auth, errors |
@@ -34,8 +35,8 @@ documentation format and checks the briefs are shaped for.
 How they relate:
 
 ```
-product-brief  ──▶  docs-bootstrap (documentation tree, backlog)  ──▶  the skills below, per item
-      └──▶  design brief  ──▶  Claude Design canvas  ──▶  design-to-compose
+product-brief  ──▶  docs-bootstrap (documentation tree, backlog)  ──▶  backlog-item, under /loop
+      └──▶  design brief  ──▶  Claude Design canvas  ──▶  design-to-compose      (one item → one PR, with the skills below)
 
 kmp-project-structure  ──▶  kmp-shared-contract  ──▶  ktor-server-feature
         (modules)               (the wire)         ──▶  compose-client-feature  ◀──  design-to-compose
