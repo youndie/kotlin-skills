@@ -7,7 +7,7 @@
     {
       "name": "kotlin-fullstack",
       "source": "./plugins/kotlin-fullstack",
-      "description": "Skills for Kotlin full-stack work: KMP project layout, the shared wire contract, Ktor server features compiled to JVM and Kotlin/Native, Compose Multiplatform client features, screens built from a design canvas and measured against it, testing across both, and naming and abstraction conventions."
+      "description": "Skills for Kotlin full-stack work: a product brief for documentation and design, KMP project layout, the shared wire contract, Ktor server features compiled to JVM and Kotlin/Native, Compose Multiplatform client features, screens built from a design canvas and measured against it, testing across both, and naming and abstraction conventions."
     }
   ]
 }

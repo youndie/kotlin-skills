@@ -15,11 +15,14 @@ each rule named next to it. Where a rule is specific to one product, the skill s
 The tool is [viddik](https://github.com/youndie/viddik), the screenshot-testing toolkit the
 testing and design skills lean on; `design-to-compose` needs its `viddikDesignParity` task
 (viddik 0.5.0 and later).
+`product-brief` writes for [docs-bootstrap](https://github.com/youndie/docs-bootstrap), the
+documentation format and checks the briefs are shaped for.
 
 ## Skills
 
 | Skill | Use it when |
 |---|---|
+| [`product-brief`](plugins/kotlin-fullstack/skills/product-brief/SKILL.md) | turning an idea or a feature request into a technical brief for docs-bootstrap and a designer brief that agree on every screen and state |
 | [`kmp-project-structure`](plugins/kotlin-fullstack/skills/kmp-project-structure/SKILL.md) | starting a KMP project, adding a module or target, deciding where a class belongs, shaping packages |
 | [`kmp-shared-contract`](plugins/kotlin-fullstack/skills/kmp-shared-contract/SKILL.md) | adding or changing an endpoint or a DTO; anything about how the client and the server talk |
 | [`ktor-server-feature`](plugins/kotlin-fullstack/skills/ktor-server-feature/SKILL.md) | a route, a validation rule, a storage port and its per-build implementations, DI, auth, errors |
@@ -31,6 +34,9 @@ testing and design skills lean on; `design-to-compose` needs its `viddikDesignPa
 How they relate:
 
 ```
+product-brief  ──▶  docs-bootstrap (documentation tree, backlog)  ──▶  the skills below, per item
+      └──▶  design brief  ──▶  Claude Design canvas  ──▶  design-to-compose
+
 kmp-project-structure  ──▶  kmp-shared-contract  ──▶  ktor-server-feature
         (modules)               (the wire)         ──▶  compose-client-feature  ◀──  design-to-compose
                                                           │                          (canvas → reference PNGs → parity loop)
@@ -76,6 +82,7 @@ plugins/kotlin-fullstack/
   skills/<name>/examples/*.md            longer code, lifted from the reference project
   skills/<name>/references/*.md          build-file skeletons, grep checklists
   skills/<name>/scripts/*.mjs            small dependency-free tools a skill runs (node)
+  skills/<name>/templates/*.md           documents a skill fills in
 ```
 
 ## Conventions of this repository
