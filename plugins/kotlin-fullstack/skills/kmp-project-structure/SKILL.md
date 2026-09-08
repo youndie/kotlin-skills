@@ -122,22 +122,38 @@ composeApp/src/commonMain/kotlin/<root>/
   App.kt                   KoinApplication + theme + scaffold
   appModule.kt             the list of feature modules
   navigation/              nav host, screen list, back-arrow rule
-  data/                    HttpClient module, session refresh, ServerException
-  useCase/  uiState/       the tiny base types
+  core/                    UseCase / ObservableUseCase, AppError, runNetworkCatching, UiText
+  network/                 HttpClient module, session refresh
   components/  theme/      cross-feature UI kit
   feature/<name>/
-    data/                  repository impl, data source, cache
-    domain/                repository interface, use cases
-    ui/                    view models, model/ (UiState), component/ (screens)
+    domain/                models, repository interface, use cases
+    data/                  repository impl, entities/DAO, mappers
+    ui/                    UiState, UiAction, UiEvent, view model, mapper, Screen + Content
     module.kt              this feature's Koin module
 composeApp/src/<platform>Main/kotlin/<root>/
-  data/ServerConfigPlatform.<platform>.kt
+  network/ServerConfigPlatform.<platform>.kt
   feature/auth/TokenStorageImpl.kt, authModulePlatform.kt
 ```
 
-What is **not** a feature and stays at the root: security, configuration, navigation, theme, the
-network client, base types. The test: a package at the root is one that several features import
-and none owns.
+**When the client outgrows one module**, the same three layers become three Gradle modules per
+feature, and the compiler enforces the dependency rule the packages could only suggest:
+
+```
+feature/<name>-domain/   plugin: <company>.kmp-library     depends on: core, other *-domain
+feature/<name>-data/     plugin: <company>.module-data     depends on: <name>-domain, core network/database
+feature/<name>-ui/       plugin: <company>.module-ui       depends on: <name>-domain, uikit; NEVER on *-data
+app/                     the only module that sees every layer; wires DI, hosts navigation
+core/<concern>/          usecase, network, database, uikit, di — one module per concern
+build-logic/             includeBuild with the convention plugins the three layers apply
+```
+
+A `ui` module that depends on a `data` module is the wiring error the split exists to make
+impossible. Cut modules when a feature is touched by more than one person or when build times
+say so, not on day one.
+
+What is **not** a feature and stays at the root (or in `core:*` modules): security,
+configuration, navigation, theme, the network client, the base use-case types, the error
+hierarchy. The test: a package at the root is one that several features import and none owns.
 
 ## Build conventions that keep the modules honest
 

@@ -36,10 +36,15 @@ was hit there first.
 | screens | `compose.uiTest` (`runComposeUiTest`) |
 | screenshots | [viddik](https://github.com/youndie/viddik) or whatever the project has |
 
-Not in the project, and not added without a conversation: **a mocking library** (JVM-only; a
-single `mockk()` in a shared server test leaves half the server unchecked on the build that
-ships) and **a Flow-testing library** (a `StateFlow` is read directly: `runCurrent()` until the
-state is there, then assert on `.value`).
+Two libraries need a decision per suite rather than a habit. **A mocking library** is JVM-only:
+in a suite that also compiles to native, a single `mockk()` makes the test JVM-only and leaves
+the build that ships unchecked, so shared suites use hand-written fakes. In a JVM-only suite
+(an Android-only client, a `jvmTest` of a UI module) mocks are acceptable for wide interfaces;
+even there a fake that holds state usually reads better than `coVerify(exactly = 1)`. **A
+Flow-testing library** (Turbine is multiplatform) is a convenience, not a requirement: a
+`StateFlow` can be read with `runCurrent()` and `.value`; Turbine earns its place when the
+*sequence* of states matters or when the state is a `stateIn(WhileSubscribed)` flow (see the
+view-model section).
 
 ## Where a test lives
 
@@ -169,29 +174,49 @@ binary was the debug one, and the image ships the release one.
 
 ## Client: view models
 
+The view model is built **directly** with fakes (or, in a JVM-only suite, mocks) of its use
+cases; no DI graph. `Dispatchers.setMain` is replaced **before** construction: `init` already
+launches into `viewModelScope`.
+
 ```kotlin
-@BeforeTest
-fun setUp() {
-    // The dispatcher is replaced BEFORE the view model is built: its init already launches into
-    // viewModelScope, i.e. onto Main, and a model built before the swap starts on the real one.
-    Dispatchers.setMain(StandardTestDispatcher())
-    startKoin { modules(testModule(FakeTransactionsRepository())) }
-    viewModel = get()
+private val accounts = MutableStateFlow<List<Account>>(emptyList())      // what ObserveAccountsUseCase returns
+private val refresh = FakeRefreshAccountsUseCase(result = Result.success(Unit))
+
+@Test
+fun `uiState should filter out unapproved accounts`() = runTest(testDispatcher) {
+    accounts.value = listOf(approved, open, closed)
+    val viewModel = createViewModel()
+
+    viewModel.uiState.test {
+        var state = awaitItem()
+        while (state.totalAccounts == 0) state = awaitItem()   // skip the initial value and the loading states
+
+        assertEquals(1, state.items.size)
+        cancelAndIgnoreRemainingEvents()                        // a StateFlow never completes
+    }
 }
 
 @Test
-fun cachedDataSaysWhenItWasTaken() = runTest {
-    while (viewModel.observe.value.data.isEmpty()) runCurrent()
-    assertNotNull(viewModel.observe.value.showingCacheFrom, "history passed stale data off as fresh")
+fun `AccountClick should emit OpenAccount event`() = runTest(testDispatcher) {
+    val viewModel = createViewModel()
+    viewModel.events.test {
+        viewModel.onAction(AccountsListUiAction.AccountClick(99L))
+        assertEquals(AccountsListUiEvent.OpenAccount(99L), awaitItem())
+    }
 }
-
-@AfterTest
-fun tearDown() { stopKoin(); Dispatchers.resetMain() }
 ```
 
+**A `stateIn(WhileSubscribed)` state does nothing until somebody collects it.** Reading
+`viewModel.uiState.value` after `runCurrent()` returns the `initialValue` forever, because the
+upstream `combine` has not started. Collect it: `uiState.test { }`, or
+`backgroundScope.launch { viewModel.uiState.collect {} }` and then `runCurrent()` and `.value`.
+The test that "passes" against the initial value guards nothing.
+
 Wait with a loop over a condition, not with `advanceTimeBy` and a guessed number: the condition
-describes what you wait for, the number describes today's implementation. A one-shot event is
-collected into a list from `backgroundScope` and counted.
+describes what you wait for, the number describes today's implementation. The three things worth
+a test per screen: the derivation (push values into the fake flows, assert the derived state),
+the flags (an action flips a flag and only that flag), and the events (an action emits the right
+event and nothing lands in the state). The mapper is tested on its own, as a pure function.
 
 ## Client: networking
 
@@ -204,11 +229,14 @@ itself comes in as a parameter.
 
 ## Compose: screens
 
-Test the **stateless Content** with `runComposeUiTest`, not JUnit rules: it receives a ready
-state and callbacks, no view model enters. Drive it with a `MutableStateFlow` collected in
+Test the **stateless Content** with `runComposeUiTest` (in a multiplatform suite; a JVM-only
+Android module may keep its JUnit rule): it receives a ready state and callbacks, no view model
+enters. Two shapes of test: **rendering** (a fixture state from the previews object; assert what
+is on screen for loading, empty, data, error, sheet open) and **wiring** (an `onAction` recorder
+list; click, assert the recorded action). Drive a form with a `MutableStateFlow` collected in
 `setContent` and updated by the test, so the test shows the form reflects state rather than
-storing its own. Find nodes by `testTag`, not by visible text — copy changes, tags do not. The
-exception is text that **is** the property under test (a "TODAY" label, a chip's caption).
+storing its own. Find nodes by `testTag` or `contentDescription`, not by visible text — copy
+changes, tags do not. The exception is text that **is** the property under test.
 
 Two platform traps: in the browser use `awaitIdle()` rather than `waitForIdle()` as the barrier
 after a state change (one event loop; the blocking wait starves the work it waits for); a popup
@@ -236,8 +264,10 @@ A missing binding is otherwise found not by a test but by a black screen. Three 
 
 1. `verify()` walks only the modules you list; view models registered inside components via
    `rememberKoinModules` never reach it and are added to the check by hand.
-2. Generic types are erased: `DataSource<Category>` and `DataSource<Transaction>` are one key.
-   Bind by name and keep a test that the unnamed binding does not come back.
+2. Generic types are erased: `Repository<Category>` and `Repository<Transaction>` are one key
+   to the container, and the last registration wins for everybody. The fix is a concrete
+   interface per aggregate; if a generic binding must exist, bind it by name and keep a test
+   that the unnamed binding does not come back.
 3. `verify()` skips constructor parameters with defaults; only resolving by type
    (`koinApplication { modules(...) }.koin.get<T>()`) sees them. On the server, resolve every port
    in each build's test (creation is stricter than reflection); on native use `checkModules()`.

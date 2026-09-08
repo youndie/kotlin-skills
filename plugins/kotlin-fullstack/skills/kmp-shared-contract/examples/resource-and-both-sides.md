@@ -18,14 +18,9 @@ class TransactionResource {
     class ById(val parent: TransactionResource = TransactionResource(), val id: String)
 }
 
-/** A record has a server-issued id. Part of the contract, not of the client's database. */
-interface WithId {
-    val id: String
-}
-
 @Serializable
 data class Transaction(
-    override val id: String,
+    val id: String,
     val amount: BigDecimalSerializable,
     val income: Boolean,
     val date: LocalDate,
@@ -33,12 +28,12 @@ data class Transaction(
     val period: Period,
     val comment: String,
     val category: Category = Category.default,   // default: an older client keeps parsing
-) : WithId {
+) {
     enum class Period { OneTime, Day, Week, TwoWeek, Month, ThreeMonth, HalfYear, Year }
 }
 
 @Serializable
-data class Category(override val id: String, val name: String) : WithId {
+data class Category(val id: String, val name: String) {
     companion object {
         /**
          * What the server substitutes when a record's category no longer exists.
@@ -123,26 +118,29 @@ fun Routing.transactionRouting() {
 }
 ```
 
-## `:composeApp` — the data source builds the URL
+## `:composeApp` — the client's API class builds the URL
 
 ```kotlin
-class TransactionsNetworkDataSource(private val httpClient: HttpClient) : DataSource<Transaction> {
+/** The only class on the client that knows the HTTP client for this resource. */
+class RulesApi(private val httpClient: HttpClient) {
 
-    override suspend fun create(params: Transaction): Transaction =
-        httpClient.post(TransactionResource()) { setBody(params) }.body()
-
-    override suspend fun load(): List<Transaction> =
+    suspend fun list(): List<Transaction> =
         httpClient.get(TransactionResource()).body()
 
-    override suspend fun update(params: Transaction): Transaction? {
-        val response = httpClient.patch(TransactionResource.ById(id = params.id)) { setBody(params) }
-        return if (response.status == HttpStatusCode.OK) response.body() else null
-    }
+    suspend fun create(rule: Transaction): Transaction =
+        httpClient.post(TransactionResource()) { setBody(rule) }.body()
 
-    override suspend fun delete(id: String): Boolean =
-        httpClient.delete(TransactionResource.ById(id = id)).status == HttpStatusCode.OK
+    suspend fun update(rule: Transaction): Transaction =
+        httpClient.patch(TransactionResource.ById(id = rule.id)) { setBody(rule) }.body()
+
+    suspend fun delete(id: String) {
+        httpClient.delete(TransactionResource.ById(id = id))
+    }
 }
 ```
+
+The repository calls this class inside `runNetworkCatching` and maps the wire class to the
+domain model; see `compose-client-feature`.
 
 ## The health pair
 

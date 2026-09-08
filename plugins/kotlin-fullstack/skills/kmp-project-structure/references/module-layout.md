@@ -341,3 +341,55 @@ fun main() {
 @Suppress("ktlint:standard:function-naming")
 fun MainViewController() = ComposeUIViewController { App() }
 ```
+
+## Feature modules per layer (the larger-app cut)
+
+Three modules per feature, three convention plugins from `build-logic/`, and one dependency rule.
+
+```kotlin
+// feature/accounts-domain/build.gradle.kts
+plugins { id("company.kmp-library") }
+kotlin.sourceSets.commonMain.dependencies {
+    implementation(projects.core.usecase)
+    implementation(projects.feature.clientDomain)     // another domain is fine
+}
+
+// feature/accounts-data/build.gradle.kts
+plugins { id("company.module-data") }               // adds network, database, serialization
+kotlin.sourceSets.commonMain.dependencies {
+    implementation(projects.feature.accountsDomain)
+}
+
+// feature/accounts-ui/build.gradle.kts
+plugins { id("company.module-ui") }                 // adds compose, lifecycle, koin-compose, uikit
+kotlin.sourceSets.commonMain.dependencies {
+    implementation(projects.feature.accountsDomain)
+    implementation(projects.feature.clientDomain)
+    // never: projects.feature.accountsData
+}
+```
+
+```kotlin
+// build-logic/src/main/kotlin/company/ModuleUiPlugin.kt (sketch)
+class ModuleUiPlugin : Plugin<Project> {
+    override fun apply(target: Project) = with(target) {
+        plugins.apply("company.kmp-library")
+        plugins.apply("org.jetbrains.compose")
+        plugins.apply("org.jetbrains.kotlin.plugin.compose")
+        extensions.configure<KotlinMultiplatformExtension> {
+            sourceSets.commonMain.dependencies {
+                implementation(project(":core:uikit"))
+                implementation(project(":core:usecase"))
+                // compose runtime, lifecycle-viewmodel, koin-compose from the catalog
+            }
+            sourceSets.commonTest.dependencies {
+                // kotlin-test, coroutines-test, compose uiTest
+            }
+        }
+    }
+}
+```
+
+The application module depends on every `*-ui` and `*-data` module, declares the Koin modules
+of each, and hosts navigation. `core:*` modules are one per concern (`usecase`, `network`,
+`database`, `uikit`, `di`) and never depend on a feature.

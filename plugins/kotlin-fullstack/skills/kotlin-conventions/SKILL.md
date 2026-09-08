@@ -32,17 +32,22 @@ and, if the repository keeps a conventions file, record it there in the same cha
 | validation | `fun <subject>Problem(x): String?` in `Rules.kt` | `transactionProblem`, `credentialsProblem` | returns the problem or null; no exception vocabulary |
 | service (server) | `<Subject>Service`, ordinary class in common | `AuthService`, `DemoService` | orchestration over ports |
 | Koin module | `val <feature>Module`, in `module.kt`; storage: `fun <technology>StorageModule(config)` | `authModule`, `mongoStorageModule` | the file name says "this feature's wiring" |
-| client data source | `<Noun>NetworkDataSource` | `TransactionsNetworkDataSource` | the transport is in the name |
-| client repository | interface `<Noun>Repository`, impl `<Noun>RepositoryImpl` | only one implementation on the client, so `Impl` is honest |
-| cache | `<Noun>Cache` | `TransactionsCache` | |
-| use case | `<Verb><Noun>UseCase`; observing flows `Observe<Noun>UseCase` | `AddTransactionUseCase`, `ObserveCategoriesUseCase` | one operation per class; the verb is the operation |
-| view model | `<Screen>ViewModel`; shared base `Base<Screen>ViewModel` | `TransactionsViewModel`, `BaseTransactionViewModel` | |
-| screen state | `<Screen>UiState`, nested states `<Part>UiState` | `TransactionListUiState`, `ServerUnreachableUiState` | |
-| user intent | `<Screen>Action` sealed interface; handlers `on<Event>` | `TransactionAction.AmountChanged`, `onDeleteClicked()` | handlers are named after what the person did, not what the code does |
-| stateful screen | `<Screen>Component` | `MainComponent` | owns the view model |
-| stateless screen | `<Screen>Content` (or `<Screen>ComponentImpl` when it is the same tree) | `MainContent`, `AuthComponentImpl` | state in, callbacks out; what tests render |
+| client repository | interface `<Noun>Repository` in `domain`, `<Noun>RepositoryImpl` in `data`; methods `observe<Noun>s()` / `refresh<Noun>s()` | `AccountRepository`, `AccountRepositoryImpl` | one implementation on the client, so `Impl` is honest; the two verbs name the source of truth and the network |
+| domain model | the noun; ids as value classes; closed sets as sealed interfaces with `Other(raw)` | `Account`, `AccountId`, `AccountKind.Other("")` | typed, not stringly; an unknown server value survives the trip |
+| database row | `<Noun>Entity` + `<Noun>Dao` | `AccountEntity`, `AccountDao` | |
+| mapper | extension functions `toEntity()` / `toDomain()` / `toDto()` next to the repository; UI side an `object <Screen>UiMapper` | `AccountEntity.toDomain()`, `AccountsUiMapper` | pure functions, each with a test |
+| use case, action | `<Verb><Noun>UseCase : BaseUseCase<P, R>` returning `Result` | `RefreshAccountsUseCase`, `DownloadStatementUseCase` | one operation per class; the verb is the operation |
+| use case, observation | `Observe<Noun>sUseCase : ObservableUseCase<P, R>` returning `Flow` | `ObserveAccountsUseCase` | a flow is not a `Result` per element |
+| errors | `AppError` sealed hierarchy: `NoNetworkError`, `ServerError(code)`, `ClientError(code)`, `UnknownAppError` | | mapped once at the repository; the UI maps them to text |
+| view model | `<Screen>ViewModel`; route arguments as `<Screen>Params` | `AccountDetailsViewModel(params: AccountDetailsParams, …)` | |
+| screen state | `<Screen>UiState` (derived, immutable); the screen's own booleans in `UiFlags` (nested as `flags` on busy screens) | `AccountsListUiState`, `AccountDetailsUiFlags` | one class per screen, never a shared base state |
+| user intent | `<Screen>UiAction` sealed interface, one `onAction()` | `AccountsListUiAction.FilterApply` | named after what the person did |
+| one-shot effect | `<Screen>UiEvent` sealed interface, `events: Flow<…>` from a `Channel` | `AccountsListUiEvent.OpenAccount` | navigation and toasts leave the view model here |
+| UI item | `<Noun>UiItem`; text as `UiText` | `AccountListUiItem`, `UiText.Resource(...)` | resolved in Compose, testable without it |
+| stateful screen | `<Screen>Screen(viewModel, callbacks)` | `AccountsListScreen` | resolves the view model, forwards events |
+| stateless screen | `<Screen>Content(state, onAction)` | `AccountsListContent` | state in, actions out; what tests and previews render |
+| previews | `<Screen>Previews` object with fixtures + one `@Preview` per state | `AccountsListPreviews` | the fixtures double for Content tests and screenshots |
 | navigation | `<App>Screen` enum for plain routes, `@Serializable class <Noun>Route(val id)` for routes with arguments | `ManiScreen.Main`, `TransactionRoute` | |
-| exception | `<Cause>Exception` extending the layer's base | `ServerException(status)`, `UserNotFoundException` | |
 | expect/actual file | `X.kt` + `X.<platform>.kt`, or the same file name in the platform source set | `ServerConfigPlatform.android.kt` | the IDE and `grep` pair them |
 | test class | `<Subject>Test`; paired tests across builds share the subject | `OwnershipTest` (JVM), `ManiApiTest` (native) | |
 | test function | an English sentence in backticks, no commas; camelCase when long | `` `a stranger cannot patch a foreign transaction through the id in the body` `` | see `kmp-testing` |
@@ -88,18 +93,33 @@ implementations the compiler checks for signature and never for behaviour. Count
 able to say what each one's platform API is (`getenv`, `SharedPreferences`, `window.location`,
 the entry point). Token signing, hashing, validation, routing and configuration are common.
 
-**A base class is earned by two concrete classes sharing behaviour**, and the shared behaviour
-must be the kind that goes wrong when copied: `BaseFlowRepository` exists because the
-optimistic-update-with-rollback dance is easy to get subtly wrong twice. A base class for
-"structure" alone is a template, not an abstraction.
+**A base class is earned by two concrete classes sharing behaviour that goes wrong when
+copied**, and it must not own the state. Two shapes that look like reuse and are not:
 
-**A generic type at a DI boundary needs a name.** `DataSource<Category>` and
-`DataSource<Transaction>` are one key to any container that erases generics; bind by name and
-keep a test that the unnamed binding does not return.
+- *A generic base state* (`BaseViewState(loading, error)`, `CommonUiState<T>`, `DataState<T>`
+  with `showData()` / `showError()`). It erases: `setError()` builds a fresh object and the
+  data that was on screen disappears; it cannot express "refreshing with data", "empty",
+  "sheet open"; and the compiler cannot check that a screen's state has what that screen needs.
+  One `data class` per screen, updated with `copy()`, derived from flows. This rule was learned
+  by deprecating exactly such a base in a large codebase, with those three reasons written on it.
+- *A generic CRUD repository over a marker interface* (`DataSource<T : WithId>`,
+  `BaseFlowRepository<T>`). It puts a client concern (`WithId`) into the domain model, forces
+  every feature into the shape of a list, and its erased generics make every DI binding need a
+  name (`DataSource<Category>` and `DataSource<Transaction>` are one key). Write the repository
+  the aggregate needs; share the optimistic-write technique as a pattern, not as a superclass.
+
+**A generic type at a DI boundary needs a name**, and the need for names is itself the signal
+that the generic should not be there.
 
 **Three shapes of one entity are not duplication.** Wire (`Transaction`), server-side record
 (`TransactionRecord`), stored document (`TransactionDb`): each edge maps, and none leaks across.
-Collapsing them puts `userId` into the contract or the driver's `ObjectId` into the client.
+Collapsing them puts `userId` into the contract or the driver's `ObjectId` into the client. On
+the client the same rule reads DTO → entity → domain → UI item, with an extension-function
+mapper at each edge; a small app may skip the domain copy and use the contract class, and says so.
+
+**Domain models are typed.** Ids are value classes, money is a type, closed sets from the server
+are sealed interfaces with an `Other(raw)` case. A `String` id and a `Double` amount compile
+everywhere and are wrong somewhere.
 
 **A sentinel value is a decision, not a placeholder.** `Category.default` declared in the
 contract with a KDoc saying when the server substitutes it. Undocumented, it reads as a stub and
@@ -114,11 +134,16 @@ constructs it in code. A decision about a value is a named function of that valu
 
 ## `Result`, exceptions and cancellation
 
-- `Result` at the **use-case boundary** on the client: the view model folds it into state. On the
-  server, routes call repositories and services directly and let `StatusPages` map exceptions;
-  there is no use-case layer in the reference server, and a small server does not need one.
-- Never nest `Result` in `Result`; unwrap with `.getOrThrow()` where the caller expects
-  exceptions.
+- `Result` at the **use-case boundary** on the client, for **actions** only: the view model folds
+  it into flags. An **observation** is a plain `Flow`; a `Flow<Result<T>>` hides failures inside
+  the stream and forces every collector to unwrap. On the server, routes call repositories and
+  services directly and let `StatusPages` map exceptions; a small server has no use-case layer.
+- Transport exceptions become a domain `AppError` **once**, at the repository; nothing above the
+  data layer imports the HTTP client. The UI maps `AppError` to `UiText`; `throwable.message` is
+  a library's English or null.
+- Never nest `Result` in `Result`; never give a `UseCase` base a `get()` that rethrows (the
+  callers bypass `Result` and the failure path goes untested); never hardcode a dispatcher in a
+  use-case base (untestable, and I/O belongs to the repository that does it).
 - `suspendRunCatching` everywhere a `runCatching` would sit in suspend code: plain `runCatching`
   swallows `CancellationException`, and a cancelled coroutine then surfaces as a network error on
   screen or as a `500` on the server. Every `catch (e: Exception)` in suspend code is preceded by
@@ -129,17 +154,23 @@ constructs it in code. A decision about a value is a named function of that valu
 ## Events versus state
 
 State is what a screen shows now; an event is news of one moment. Session expiry, logout, "saved,
-close the screen" are events. Model them as a `SharedFlow` with `replay = 0` (or a dedicated
-`StateFlow` the consumer resets) — **never** as a field inside a state that is rebuilt by a
-subscription, because the next emission overwrites it, and never as a subscription that rebuilds
-navigation, because a rebuilt graph resets to its start destination. Both were real defects.
+close the screen", "open this account" are events. In a view model they are a sealed `UiEvent`
+sent through a `Channel` and exposed as `receiveAsFlow()`, collected once by the Screen; outside
+view models a `SharedFlow` with `replay = 0`. **Never** a `success: Boolean` or `loggedOut` field
+inside a state (the next emission overwrites it, or a `LaunchedEffect` fires on it again), and
+never a subscription that rebuilds navigation, because a rebuilt graph resets to its start
+destination. All three were real defects.
+
+**State is derived, not assigned.** A view model's `UiState` is a `combine` of domain flows,
+input flows and its own `UiFlags`, turned into a `StateFlow` with `stateIn`. `state.value = …`
+in more than one place is the sign that two writers will race and one will erase the other.
 
 ## Immutability and concurrency
 
 - `ImmutableList` / `ImmutableMap` / `ImmutableSet` in every UiState: Compose skips recomposition
   only for stable types.
-- Shared mutable flows change through `MutableStateFlow.update { }`; `value += x` is three steps
-  and loses concurrent writes.
+- Flows that several coroutines write change through `MutableStateFlow.update { }`; `value += x`
+  is three steps and loses concurrent writes. Better still, do not have several writers: derive.
 - A resource with a pool (a database client) is one `single` per process; the comment says why.
 
 ## Comments and KDoc
@@ -188,6 +219,9 @@ above. Then read for:
 
 - [ ] a new `expect` without a platform API behind it
 - [ ] an interface with one implementation and no test that fakes it
+- [ ] a base state, a base view model, or a generic CRUD repository over a marker interface
+- [ ] a `Flow<Result<T>>`; a `UseCase` base with a rethrowing `get()`; a hardcoded dispatcher in a base
+- [ ] `state.value =` in more than one place of a view model; a `success` or `loggedOut` flag in a state
 - [ ] a string path or a copied DTO outside the contract module
 - [ ] `org.junit` imports; a mocking library in a shared suite
 - [ ] `runCatching` in suspend code; `catch (e: Exception)` without a cancellation rethrow above

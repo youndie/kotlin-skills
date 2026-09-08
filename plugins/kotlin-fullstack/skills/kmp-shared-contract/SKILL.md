@@ -63,7 +63,6 @@ do not have to touch the shared module" is not a compromise, it is a future bug.
 | request and response DTOs, `@Serializable data class` | the shape exists once |
 | enums that travel on the wire (`Transaction.Period`) | both sides switch on them |
 | serializers for wire types (money as a decimal string) | both sides must agree byte for byte |
-| tiny interfaces the model needs (`WithId { val id: String }`) | the model does not compile without them |
 | pure functions **both** sides need (the balance simulation in the reference) | the only place where both get the same answer |
 
 ## What stays out, and where it goes instead
@@ -76,6 +75,13 @@ do not have to touch the shared module" is not a compromise, it is a future bug.
 | repository interfaces, use cases, exceptions | the contract describes the wire, not how a side is layered; otherwise the client depends on the server's layering | each side's own feature package |
 | UI state, formatting | presentation | the client |
 | the storage document shape | the database is a third party to the contract | each server build's `data/` |
+
+On the client the contract class is the **DTO**. A small app may use it as its domain model
+and say so; a larger one maps it into a domain model at the data layer (DTO → entity → domain),
+so an API rename does not ripple through every screen, and so ids and money can be typed
+(`value class`, a `Money` type) even though the wire carries strings. A client concern (a marker
+interface such as `WithId` so a generic repository can find the id) does **not** go into the
+contract: it is a client-side abstraction leaking into the shared module.
 
 The `Record` split is worth spelling out. The reference has three shapes of one entity:
 `Transaction` (wire, in `:shared`), `TransactionRecord` (server-common: adds `userId` and

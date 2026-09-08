@@ -23,47 +23,107 @@ class FakeTransactionsRepository(
 }
 ```
 
-## View model
+## View model: fakes of the use cases, the derived state collected
 
 ```kotlin
-private fun testModule(repository: TransactionRepository) = module {
-    single<TransactionRepository> { repository }
-    single<GetTransactionsUseCase> { GetTransactionsUseCase(get()) }
-    single<GetCurrentCurrencyUseCase> { GetCurrentCurrencyUseCase(get()) }
-    single<CurrentCurrencyRepository> { object : CurrentCurrencyRepository { override var currency = Currency.Usd } }
-    single<DeleteTransactionsUseCase> { DeleteTransactionsUseCase(get()) }
-    single<TransactionsViewModel> { TransactionsViewModel(get(), get(), get()) }
+private class FakeRefreshAccountsUseCase(var result: Result<Unit> = Result.success(Unit)) : RefreshAccountsUseCase {
+    var calls = 0
+    override suspend fun invoke(params: Unit): Result<Unit> { calls++; return result }
 }
 
 @OptIn(ExperimentalCoroutinesApi::class)
-class TransactionsViewModelErrorTest : KoinTest {
-    private lateinit var viewModel: TransactionsViewModel
+class AccountsListViewModelTest {
+    private val testDispatcher = StandardTestDispatcher()
+    private val accounts = MutableStateFlow<List<Account>>(emptyList())
+    private val currencies = MutableStateFlow<List<Currency>>(emptyList())
+    private val refresh = FakeRefreshAccountsUseCase()
 
-    @BeforeTest
-    fun setUp() {
-        // The dispatcher is replaced BEFORE the model is built: its init already launches into
-        // viewModelScope, i.e. onto Main, and a model built before the swap starts on the real one.
-        Dispatchers.setMain(StandardTestDispatcher())
-        startKoin { modules(testModule(FakeTransactionsRepository({ true }))) }
-        viewModel = get()
+    @BeforeTest fun setUp() = Dispatchers.setMain(testDispatcher)   // before the view model exists
+    @AfterTest fun tearDown() = Dispatchers.resetMain()
+
+    private fun createViewModel() = AccountsListViewModel(
+        observeAccountsUseCase = ObservableUseCase { accounts },
+        refreshAccountsUseCase = refresh,
+        observeCurrenciesUseCase = ObservableUseCase { currencies },
+    )
+
+    /** The derivation: what comes out of the combine for a given input. */
+    @Test
+    fun `uiState should filter out unapproved accounts`() = runTest(testDispatcher) {
+        accounts.value = listOf(account(1, state = ACTIVE), account(2, state = OPENING), account(3, state = CLOSED))
+        val viewModel = createViewModel()
+
+        viewModel.uiState.test {
+            var state = awaitItem()
+            while (state.totalAccounts == 0) state = awaitItem()
+
+            assertEquals(1, state.items.size)
+            assertEquals(3, state.totalAccounts)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /** The flags: an action flips one flag and erases nothing. */
+    @Test
+    fun `refresh failure should set the error and keep the list`() = runTest(testDispatcher) {
+        accounts.value = listOf(account(1, state = ACTIVE))
+        refresh.result = Result.failure(NoNetworkError())
+        val viewModel = createViewModel()
+
+        viewModel.uiState.test {
+            var state = awaitItem()
+            while (state.errorMessage == null) state = awaitItem()
+
+            assertEquals(1, state.items.size, "the error erased the list")
+            assertFalse(state.loading)
+            cancelAndIgnoreRemainingEvents()
+        }
+    }
+
+    /** The events: an action leaves through events, not through the state. */
+    @Test
+    fun `AccountClick should emit OpenAccount`() = runTest(testDispatcher) {
+        val viewModel = createViewModel()
+
+        viewModel.events.test {
+            viewModel.onAction(AccountsListUiAction.AccountClick(99L))
+            assertEquals(AccountsListUiEvent.OpenAccount(99L), awaitItem())
+        }
     }
 
     /**
-     * A network failure is a state of the whole screen, as on the main one.
-     * Before, the history showed "Network Error" over an empty list and tried nothing more: an empty
-     * list reads as "no rules", although the rules are there and the connection is gone.
+     * The trap: a stateIn(WhileSubscribed) state stays at initialValue until collected.
+     * Without the collector below, `.value` is the initial loading state forever and the assertion
+     * would pass against it — for the wrong reason.
      */
     @Test
-    fun testLoadTransactionsFailed() = runTest {
-        while (viewModel.observe.value.loading) runCurrent()
+    fun `reading value needs a collector`() = runTest(testDispatcher) {
+        accounts.value = listOf(account(1, state = ACTIVE))
+        val viewModel = createViewModel()
+        backgroundScope.launch { viewModel.uiState.collect {} }
 
-        val unreachable = assertNotNull(viewModel.observe.value.unreachable, "history stayed silent about the failure")
-        assertNotNull(unreachable.cause, "no cause named: by code and host a person tells their network from a foreign server")
-        assertTrue(viewModel.observe.value.data.isEmpty())
+        while (viewModel.uiState.value.totalAccounts == 0) runCurrent()
+
+        assertEquals(1, viewModel.uiState.value.items.size)
+    }
+}
+```
+
+## The mapper, as a pure function
+
+```kotlin
+class AccountsUiMapperTest {
+    @Test
+    fun `account number is grouped for reading`() {
+        val item = AccountsUiMapper.toListItem(account(number = "20208000100000000001"))
+        assertEquals("20208 000 1 00000000 001", item.accountNumber)
     }
 
-    @AfterTest
-    fun tearDown() { stopKoin(); Dispatchers.resetMain() }
+    @Test
+    fun `an unknown kind falls back to the primary label instead of crashing`() {
+        val item = AccountsUiMapper.toListItem(account(kind = AccountKind.Other("brand-new")))
+        assertEquals(AccountStatusKindUi.Primary, item.type.kind)
+    }
 }
 ```
 
@@ -124,42 +184,55 @@ class RefreshSessionTest {
 }
 ```
 
-## Compose UI on the stateless Content (`commonTest`)
+## Compose UI on the stateless Content
+
+Rendering from fixtures, wiring through an action recorder:
 
 ```kotlin
-/**
- * The credentials form as such: fields, the button, the error line.
- * The component is shared by sign-in and sign-up, so it is checked, not the two screens. State
- * comes from outside and is changed by the test as it goes — showing the form reflects state
- * rather than keeping its own.
- */
-class AuthComponentTest {
-    @OptIn(ExperimentalTestApi::class)
+@OptIn(ExperimentalTestApi::class)
+class AccountsListContentTest {
     @Test
-    fun authComponentTest() {
-        val stateFlow = MutableStateFlow(AuthComponentUiState(title = "AuthTest", username = "", password = "", buttonText = "Submit", errorMessage = null, loading = false))
+    fun `data state shows the items`() = runComposeUiTest {
+        setContent { AppTheme { AccountsListContent(state = AccountsListUiState(items = AccountsListPreviews.items, totalAccounts = 2)) } }
 
-        runComposeUiTest {
-            setContent {
-                val state = stateFlow.collectAsState()
-                AuthComponentImpl(
-                    state = state.value,
-                    onUsernameChanged = { v -> stateFlow.update { it.copy(username = v) } },
-                    onPasswordChanged = { v -> stateFlow.update { it.copy(password = v) } },
-                    onButtonClicked = { stateFlow.update { it.copy(loading = true) } },
-                )
-            }
-
-            onNodeWithTag("username").performTextInput("TESTER")
-            assertEquals("TESTER", stateFlow.value.username)
-
-            onNodeWithTag("login").performClick()
-            assertTrue(stateFlow.value.loading)
-
-            stateFlow.update { it.copy(loading = false, errorMessage = "Error!") }
-            onNodeWithTag("errorMessage").assertTextEquals("Error!")
-        }
+        onNodeWithText("Main account").assertExists()
     }
+
+    @Test
+    fun `filter button sends FiltersSheetShow`() = runComposeUiTest {
+        val actions = mutableListOf<AccountsListUiAction>()
+        setContent { AppTheme { AccountsListContent(state = AccountsListUiState(), onAction = { actions += it }) } }
+
+        onNodeWithContentDescription("Show filters").performClick()
+
+        assertEquals(listOf(AccountsListUiAction.FiltersSheetShow), actions)
+    }
+
+    @Test
+    fun `the filters sheet is reachable because it lives in the Content`() = runComposeUiTest {
+        setContent { AppTheme { AccountsListContent(state = AccountsListUiState(filtersSheetVisible = true)) } }
+
+        onNodeWithTag("filtersSheet").assertIsDisplayed()
+    }
+}
+```
+
+A form driven from outside, so the test shows the form reflects state rather than keeping its own:
+
+```kotlin
+val stateFlow = MutableStateFlow(AuthContentState(username = "", password = ""))
+runComposeUiTest {
+    setContent {
+        val state by stateFlow.collectAsState()
+        AuthContent(state = state, onAction = { action ->
+            when (action) {
+                is AuthAction.UsernameChanged -> stateFlow.update { it.copy(username = action.value) }
+                else -> Unit
+            }
+        })
+    }
+    onNodeWithTag("username").performTextInput("TESTER")
+    assertEquals("TESTER", stateFlow.value.username)
 }
 ```
 
@@ -193,7 +266,7 @@ fun HomeForecastScreenshot() {
             forecast = ForecastUiState.RunsOut("12 October", 60, "4 895 $"),
             // The chart is substituted with a ready state: by default MainContent resolves it
             // through Koin, and a picture must depend on neither the graph nor the network.
-            chart = { expanded -> ChartComponent(ChartUi(days = fixedDays, currency = Currency.Usd, todayIndexProvider = { 30 }), expanded = expanded) },
+            chart = { expanded -> Chart(ChartUi(days = fixedDays, currency = Currency.Usd, todayIndexProvider = { 30 }), expanded = expanded) },
         )
     }
 }
@@ -221,27 +294,7 @@ class ClientKoinModuleTest {
             extraTypes = listOf(
                 HttpClientEngine::class,
                 HttpClientConfig::class,
-                AuthUseCase::class,   // the screen chooses the binding: sign-in gives LoginUseCase, sign-up SignupUseCase
             ),
         )
     }
 }
-
-/**
- * Different data sources must not swap places. DataSource<T> is generic and generics are erased:
- * to Koin DataSource<Category> and DataSource<Transaction> are one key, and the last registration
- * wins for everybody. In the browser it looked like ClassCastException on opening the main screen.
- */
-class DataSourceBindingTest : KoinTest {
-    @AfterTest fun tearDown() = stopKoin()
-
-    @Test
-    fun sourcesAreBoundByName() {
-        val koin = startKoin { modules(appModules) }.koin
-        assertIs<TransactionsNetworkDataSource>(koin.get<DataSource<Transaction>>(named(TRANSACTIONS_SOURCE)))
-        assertIs<CategoriesNetworkDataSource>(koin.get<DataSource<Category>>(named(CATEGORIES_SOURCE)))
-        // And no source hangs on the unnamed key: that is the one that mixed them up.
-        assertNull(koin.getOrNull<DataSource<Transaction>>(), "a data source is bound to the generic interface without a name again")
-    }
-}
-```

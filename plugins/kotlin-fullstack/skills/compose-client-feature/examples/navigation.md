@@ -1,5 +1,9 @@
 # Navigation: a graph built once, explicit transitions, expiry as an event
 
+The screens below take navigation callbacks (`onSuccess`, `onLoggedOut`); inside each Screen
+those callbacks are invoked from the view model's `events` flow, never from a `success` flag in
+the state. The nav host itself stays as shown.
+
 ```kotlin
 enum class ManiScreen { Preload, Main, History, Add, Transaction, Welcome, Login, Signup }
 
@@ -70,7 +74,7 @@ fun ManiAppNavHost(navController: NavHostController, appBarState: MainAppBarStat
 
     StableNavHost(navController, startDestination, Modifier.fillMaxSize()) {
         composable(ManiScreen.Main.name) {
-            MainComponent(
+            MainScreen(
                 appBarState, snackbarHostState,
                 onTransactionClicked = { navController.navigate(TransactionRoute(it)) },
                 onAddTransactionClicked = { navController.navigate(ManiScreen.Add.name) },
@@ -78,7 +82,7 @@ fun ManiAppNavHost(navController: NavHostController, appBarState: MainAppBarStat
             )
         }
         composable(ManiScreen.Welcome.name) {
-            WelcomeComponent(
+            WelcomeScreen(
                 appBarState,
                 onSignInClicked = { navController.navigate(ManiScreen.Login.name) },
                 // The welcome screen leaves the stack and the graph's start destination moves to main —
@@ -88,7 +92,7 @@ fun ManiAppNavHost(navController: NavHostController, appBarState: MainAppBarStat
         }
         composable(ManiScreen.Add.name) { AddTransactionComponent { navController.popBackStack() } }
         composable<TransactionRoute> { entry ->
-            EditTransactionComponent(entry.toRoute<TransactionRoute>()) { navController.popBackStack() }
+            EditTransactionScreen(entry.toRoute<TransactionRoute>()) { navController.popBackStack() }
         }
     }
 }
