@@ -86,6 +86,8 @@ plugins/kotlin-fullstack/
   skills/<name>/references/*.md          build-file skeletons, grep checklists
   skills/<name>/scripts/*.mjs            small dependency-free tools a skill runs (node)
   skills/<name>/templates/*.md           documents a skill fills in
+  skills/<name>/evals/evals.json         test prompts with checkable expectations (skill-creator shape)
+  skills/<name>/evals/files/             fixtures those prompts run against
 ```
 
 ## Conventions of this repository

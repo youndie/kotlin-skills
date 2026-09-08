@@ -1,0 +1,4 @@
+{ "artboards": [
+  { "file": "Checkout_Empty.dc.html", "x": 0, "y": 0, "w": 390, "h": 844 },
+  { "file": "Checkout Data.dc.html", "x": 480, "y": 0, "w": 390, "h": 844 }
+], "launch": { "view": "canvas" } }

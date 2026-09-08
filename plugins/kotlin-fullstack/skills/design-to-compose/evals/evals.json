@@ -1,0 +1,26 @@
+{
+  "skill_name": "design-to-compose",
+  "evals": [
+    {
+      "id": 1,
+      "name": "references-from-artboards",
+      "prompt": "A designer handed over the artboards for the Checkout screen as files in {fixture}/checkout-canvas (two .dc.html artboards, canvas.json, one image). Produce the reference PNGs the screenshot parity task will compare against, into {fixture}/snapshots/design, and write the token table for the screen into {fixture}/tokens.md. Do not write any Kotlin yet; there is no Compose project here.",
+      "files": [
+        "evals/files/checkout-canvas"
+      ],
+      "setup": "mkdir -p {fixture} && cp -R <skill>/evals/files/checkout-canvas {fixture}/",
+      "expected_output": "Checkout_Empty.png (390x844) rendered by the skill's script from the static artboard; Checkout Data flagged as not static and not presented as a reference; both PNGs looked at; a token table with the artboard's exact values mapped to Material roles.",
+      "expectations": [
+        "scripts/canvas-references.mjs from the skill was run with --dir (not a hand-written renderer)",
+        "{fixture}/snapshots/design/Checkout_Empty.png exists and is 390x844",
+        "The report says Checkout Data.dc.html is not static ({{ holes }}, sc-for) and that its PNG is not a reference",
+        "The report says the stem 'Checkout Data' is sanitised to Checkout_Data and how the fixture must be named",
+        "Both rendered PNGs were opened and looked at, and the Empty one is described correctly (centred circle, 'Your cart is empty', a logo image)",
+        "tokens.md maps #f7f5f2, #b45309, #1c1917 and #57534e to theme roles rather than literals, and records 20px/600 and 14px as type roles, gap 16, radius 32, root 390x844",
+        "The report proposes the fixture as group Checkout, name Empty, width 390, height 844",
+        "The report asks for a static version of the Data artboard or a hand export, and does not edit the artboard source",
+        "The font in the artboard (system-ui) is flagged as not reproducible and a bundled family is requested"
+      ]
+    }
+  ]
+}

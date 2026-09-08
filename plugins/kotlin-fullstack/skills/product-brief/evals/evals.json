@@ -1,0 +1,25 @@
+{
+  "skill_name": "product-brief",
+  "evals": [
+    {
+      "id": 1,
+      "name": "greenfield-two-briefs",
+      "prompt": "I want a small app for a household: a shared grocery list. Two or three people in one household add items, tick them off in the shop, and see who added what. Android and iOS phones only, Kotlin all the way (KMP client with Compose, Ktor server). Nobody can answer questions right now; write the briefs into {fixture} with your assumptions stated.",
+      "files": [],
+      "setup": "mkdir -p {fixture} && git -C {fixture} init -q",
+      "expected_output": "research/brief-technical.md and research/brief-design-<feature>.md, agreeing on every screen and state, with decisions marked verified or hypothesis, sample data, and backlog seeds carrying priority and stage.",
+      "expectations": [
+        "{fixture}/research/brief-technical.md and at least one {fixture}/research/brief-design-*.md exist",
+        "Every screen in the technical brief has a state table whose artboard names are <PascalName>_<State> using letters, digits and underscores only",
+        "Every artboard listed in the design brief, with a trailing _Dark stripped, is a state of that screen in the technical brief, and every state has an artboard",
+        "Section 5a lists sample data with a fixed date, and the design brief repeats the same values",
+        "Every row of the decisions table ends in a 'verified against' with a source or the word hypothesis; no library version is asserted without one",
+        "Every feature block names modules, screens and endpoints and has at least one scenario marked target",
+        "Every endpoint route has a tier, a minimum role and at least one error; the group names a contract class and a service",
+        "The backlog seeds table has priority and stage columns and a stage table above it; blocked_by references seed numbers only",
+        "Tenancy (a household with members) is stated once in section 3 and reflected in the endpoint roles",
+        "The assumptions taken because nobody could answer are listed explicitly, at most five questions were deferred, and both briefs say they are deleted before the branch merges"
+      ]
+    }
+  ]
+}

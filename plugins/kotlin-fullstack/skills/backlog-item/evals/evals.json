@@ -1,0 +1,63 @@
+{
+  "skill_name": "backlog-item",
+  "evals": [
+    {
+      "id": 1,
+      "name": "pick-by-rule",
+      "prompt": "Advance the backlog of the repository at {fixture} by one iteration. Stop once the branch for the chosen item exists with its first commit; do not implement the item. Report which item you picked and why, and anything about the backlog's state a person should know.",
+      "files": [
+        "evals/files/setup-fixture.sh",
+        "evals/files/backlog-fixture"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} pick",
+      "expected_output": "B-01 is picked as the first open item by priority whose blockers are done; a branch feat/b-01-* carries one commit flipping the item to wip with the index regenerated; B-03 (wip, no branch) and B-05 (blocked by the question B-02) are reported for a person.",
+      "expectations": [
+        "The report names B-01 as the picked item",
+        "The report states the rule that chose it: the first open item by priority whose blockers are all done, not a preference",
+        "make check or scripts/backlog_index.py --check was run before the pick",
+        "B-03 is reported as wip with no branch and marked as a question for a person, not silently skipped",
+        "B-05 is reported as blocked by B-02 and B-02 as a question waiting for a person",
+        "A branch named feat/b-01-<slug> exists, created from main",
+        "The first commit on that branch changes docs/backlog/B-01-*.md status to wip and the regenerated backlog.md, and nothing else",
+        "No source file under loans-service, catalog-api or librarian-web was modified",
+        "The commit message is Conventional Commits with a Refs: B-01 footer and no tool signature",
+        "The working tree is clean at the end"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "resume-wip-branch",
+      "prompt": "Advance the backlog of the repository at {fixture} by one iteration. Stop once you have the branch you will work on checked out and have said what you will do next; do not implement anything. Report what you found.",
+      "files": [
+        "evals/files/setup-fixture.sh",
+        "evals/files/backlog-fixture"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} resume",
+      "expected_output": "The existing branch feat/b-01-retry-failed-overdue-notices is resumed: the Iteration 1 entry in B-01 is read and quoted, no second branch is created, no item is picked anew.",
+      "expectations": [
+        "The branch feat/b-01-retry-failed-overdue-notices is checked out and identified as a previous iteration's",
+        "The Iteration 1 findings entry in B-01 is read and its content reflected in the report",
+        "No new branch is created and no other item is picked",
+        "B-01's status is not flipped again and no new commit is made",
+        "The report says what the next step on B-01 is, derived from the findings entry"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "dirty-tree-stops",
+      "prompt": "Advance the backlog of the repository at {fixture} by one iteration. Report what you did.",
+      "files": [
+        "evals/files/setup-fixture.sh",
+        "evals/files/backlog-fixture"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} dirty",
+      "expected_output": "The uncommitted edit in docs/features/feature-overdue-notices.md ends the iteration: it is named in the report, nothing is committed, stashed or reset, no branch is created.",
+      "expectations": [
+        "The report names docs/features/feature-overdue-notices.md as uncommitted work",
+        "No commit, stash, checkout -- or reset touched the working tree; git status still shows the edit",
+        "No branch was created and no item was picked",
+        "The report says the iteration ended because of the dirty tree and what a person should do"
+      ]
+    }
+  ]
+}
