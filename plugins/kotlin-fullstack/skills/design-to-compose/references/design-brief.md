@@ -11,8 +11,8 @@ person exporting anything, and a screen the code can be measured against.
 > (`<link or path to theme / tokens / component sheet>`), as **static artboards**, one artboard
 > per screen state, on a canvas page per screen.
 >
-> 1. **One artboard per state, named `<Screen>_<State>`**: `Checkout_Empty`, `Checkout_Data`,
->    `Checkout_Error`, `Checkout_Loading`, `Checkout_DeleteDialog`. Letters, digits and
+> 1. **One artboard per state, named `<Screen>_<State>`**: `Checkout_Loading`, `Checkout_Empty`,
+>    `Checkout_Content`, `Checkout_Error`, `Checkout_DeleteDialog`. Letters, digits and
 >    underscores only. The states are the ones in the screen document: `<list them>`. A dark
 >    variant is `<Screen>_<State>_Dark`.
 > 2. **Fixed size, the target's**: `390×844` for the phone screens, `<w>×<h>` for `<other>`. Set

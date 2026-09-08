@@ -7,10 +7,13 @@
 | Platforms | <android, ios, desktop, web; phone / tablet> |
 | Stack | <Kotlin Multiplatform: `shared` contract, `server` (JVM + native), `composeApp`> — *decided*, see §8 |
 | Documentation | `docs/` inside the repository, docs-bootstrap format |
-| Status of this document | input for docs-bootstrap; delete after the documentation tree exists |
+| Status of this document | a branch artefact under `research/`; deleted before the branch merges |
 
-Sections 3–7 map onto the documentation layers one to one (§3 → `research/`, §4 → `features/`,
-§5 → `screens/`, §6 → `api/`, §7 → `services/`); §9 becomes the backlog, one file per item.
+How the sections become documentation: §8 and §10 are the research document
+(`docs/research/research-architecture.md`, the one layer that can exist before the code); §3
+feeds the features' business rules; §4 → `features/`, §5 → `screens/`, §6 → `api/`, §7 →
+`services/` are drafted in a pull request that stays open and gets its code anchors as the code
+lands; §9 becomes the backlog, in whichever of docs-bootstrap's two forms fits its size.
 
 ## 1. Problem and audience
 
@@ -34,7 +37,7 @@ No implementation words.
 | `Account` | server id | `Client` | <closed set of kinds: …> |
 
 Tenancy: <none / one tenant per user / organisations with roles `owner`, `member`, …>. This
-decides every repository signature and every tier column below; state it once here.
+decides every repository signature and every role column below; state it once here.
 
 ## 4. Features
 
@@ -49,7 +52,8 @@ the code before the feature document is merged as `active`.
 
 - <rule>
 
-**Screens:** <screen ids or "none">. **Endpoints:** <endpoint ids or "none">.
+**Modules:** <module ids from §7>. **Screens:** <screen ids or "none">. **Endpoints:**
+<endpoint ids or "none">.
 
 **Scenarios (target):**
 
@@ -58,17 +62,21 @@ the code before the feature document is merged as `active`.
 
 ## 5. Screens
 
-The single source of the screen and state names: the screen documents' section 1, the design
-brief's artboards, the screenshot fixtures and the reference PNGs are all copied from here.
+The screen and state names are written once, here. The design brief's artboards are copied
+from this table; the screen documents' section 1 starts as a copy of it and is re-read from
+the real state class before the document goes `active`, so the code is what finally names the
+states and this table is what they are held against until then.
 
 ### screen-<kebab>: <title> (`<PascalName>`)
 
 | | |
 |---|---|
-| Entry | <route / tab / deep link> |
+| Platforms | <android, ios, …> |
+| Entry | android: <route>; ios: <route>; web: <path> |
 | Parent feature | feature-<kebab> |
-| Calls | endpoint-<kebab>, … |
-| Sizes | <390×844 phone; 1440×900 desktop if it ships> |
+| Calls | endpoint-<kebab>, … (or "no API") |
+| Sizes | <390×844 phone>; <other form factors as answered in the interview, never assumed> |
+| Source | filled in by the implementer: the feature directory in the code |
 
 | State | Artboard | What is visible |
 |---|---|---|
@@ -78,20 +86,35 @@ brief's artboards, the screenshot fixtures and the reference PNGs are all copied
 | Error | `<PascalName>_Error` | <…> |
 | <own state> | `<PascalName>_<State>` | <…> |
 
-Dark variants: <none / every state / listed states>.
+Dark variants: <none / every state / listed states> — an artboard `<PascalName>_<State>_Dark`
+per listed state; it is the same state, so it is not a row here.
 
 **Actions** (transitions, not states): <tap row → screen-…; pull to refresh; …>.
 
+### 5a. Sample data
+
+The values every artboard, preview, scenario and screenshot fixture shows, so that they all
+show the same thing:
+
+| Entity | Values |
+|---|---|
+| `Client` | <name> |
+| `Account` | <two or three rows: names, amounts, currencies> |
+| Today | <YYYY-MM-DD, fixed> |
+
 ## 6. API
 
-Per feature, every route including internal ones, with the tier that may call it.
+Per feature, every route including internal ones. The tier is who may call it (end user, bot,
+service-to-service); the minimum role is checked inside that tier.
 
 ### endpoint-<kebab>: <group>
 
-| Method | Path | Tier | Request | Response | Errors |
-|---|---|---|---|---|---|
-| `GET` | `/api/v1/accounts` | end user | — | list of `AccountDto` | `401` |
-| `POST` | `/api/v1/accounts` | `owner` | `CreateAccountRequest` | `AccountDto` | `400` validation, `403` role, `409` duplicate name |
+Contract class: `shared: <Resource class>`. Service: `server`.
+
+| Method | Path | Tier | Min role | Request | Response | Errors | In the public schema? |
+|---|---|---|---|---|---|---|---|
+| `GET` | `/api/v1/accounts` | end user | member | — | list of `AccountDto` | `401` | yes |
+| `POST` | `/api/v1/accounts` | end user | owner | `CreateAccountRequest` | `AccountDto` | `400` validation, `403` role, `409` duplicate name | yes |
 
 Wire conventions (once, for the whole product): <json settings; "not yours / does not exist" →
 `404` with the tenant filter; error body shape>. These are the decisions `kmp-shared-contract`
@@ -99,11 +122,11 @@ records; a brief that leaves them open leaves them to be decided per endpoint.
 
 ## 7. Modules and services
 
-| Module | Role | Stack | Storage / config | New or existing |
-|---|---|---|---|---|
-| `shared` | contract: DTOs, routes, error codes | KMP (jvm, native, android, ios, wasm) | — | new |
-| `server` | HTTP + use cases, compiled to JVM and Linux native | Ktor, Koin | <db>, env: `<VAR>`… | new |
-| `composeApp` | the client for every platform | Compose Multiplatform, Koin, navigation | local db: <yes/no> | new |
+| Module | Role | Stack | Storage / config | Depends on | Publishes | New or existing |
+|---|---|---|---|---|---|---|
+| `shared` | contract: DTOs, routes, error codes | KMP (jvm, native, android, ios, wasm) | — | — | — (a Gradle module of this build; an artifact only when consumed from another repository) | new |
+| `server` | HTTP + use cases, compiled to JVM and Linux native | Ktor, Koin | <db>, env: `<VAR>`… | `shared`, <db> | container image | new |
+| `composeApp` | the client for every platform | Compose Multiplatform, Koin, navigation | local db: <yes/no> | `shared`, `server` (HTTP) | app binaries | new |
 
 Deploy and environments in one paragraph, if known; otherwise "not decided" — never a guess
 dressed as a plan.
@@ -111,24 +134,32 @@ dressed as a plan.
 ## 8. Decisions and hypotheses
 
 Every claim about a library, a version, a platform limit or an existing system, with where it
-was verified — or the word *hypothesis*.
+was verified — or the word *hypothesis*. This table and §10 are the research document.
 
 | Decision / claim | Why | Verified against / *hypothesis* |
 |---|---|---|
-| Kotlin <x.y>, Compose Multiplatform <x.y> | the reference project's line | Maven Central listing, <date> |
+| Kotlin <x.y>, Compose Multiplatform <x.y> | <the project whose versions this copies, or "latest stable on Maven Central"> | Maven Central listing, <date> |
 | <db> | <reason> | *hypothesis* — check driver support on Kotlin/Native before §9 item 2 |
 | Bundled font: <family> | goldens and design references must share a family | Google Fonts page, licence <OFL> |
+| Screenshot parity: viddik ≥ 0.5.0 (`viddikDesignParity`) | the client items are accepted against the design | <registry listing, date> / *hypothesis* |
 
 ## 9. Backlog seeds
 
-Ordered by dependency: contract producers first, consumers after. Each becomes one backlog
-item; the acceptance criterion is an observable result.
+Ordered by dependency: whatever others compile against first. Each becomes one backlog item;
+the acceptance criterion is an observable result. The stages are the ones `backlog.md` will
+list — name them here so the items can carry them.
 
-| # | Title | Size | Feature | Blocked by | Acceptance |
-|---|---|---|---|---|---|
-| 1 | contract: `AccountDto`, routes, error codes | S | feature-<kebab> | — | `shared` publishes; both builds of `server` compile against it |
-| 2 | server: accounts use cases and routes | M | feature-<kebab> | 1 | scenarios of §4 pass on the JVM and native builds |
-| 3 | client: accounts list screen, states per §5 | M | feature-<kebab> | 1, canvas | `viddikDesignParity` within tolerance for every `Accounts_*` artboard |
+| Stage id | Stage | What it is |
+|---|---|---|
+| `stage-1-<kebab>` | <name> | <what is true when it closes> |
+| `stage-2-<kebab>` | <name> | <…> |
+
+| # | Title | Priority | Size | Stage | Feature | Blocked by | Acceptance |
+|---|---|---|---|---|---|---|---|
+| 1 | contract: `AccountDto`, routes, error codes | P1 | S | `stage-1-<kebab>` | feature-<kebab> | — | both `server` builds and `composeApp` compile against `shared` |
+| 2 | server: accounts use cases and routes | P1 | M | `stage-1-<kebab>` | feature-<kebab> | 1 | scenarios of §4 pass on the JVM and native builds |
+| 3 | design: reference PNGs for `Accounts_*` in `composeApp/src/desktopTest/snapshots/design/` | P1 | S | `stage-1-<kebab>` | feature-<kebab> | — | one PNG per artboard of §5, sizes as in §5 |
+| 4 | client: accounts list screen, states per §5 | P1 | M | `stage-1-<kebab>` | feature-<kebab> | 1, 3 | `viddikDesignParity` within tolerance for every `Accounts_*` artboard; goldens recorded |
 
 ## 10. Open questions
 

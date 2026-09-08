@@ -8,8 +8,8 @@ description: "Turn a product idea, a feature request or a rough conversation int
 What comes out is two documents, written from **one list of screens and states**:
 
 ```
-conversation ──► technical brief ──► docs-bootstrap (features / screens / api / services / backlog)
-                        │
+conversation ──► technical brief ──► docs-bootstrap (research now; features / screens / api / services
+                        │                             drafted in an open PR; the backlog)
                         └──► design brief ──► Claude Design canvas ──► design-to-compose
 ```
 
@@ -62,7 +62,8 @@ One page, agreed with the user before the long documents:
   "tapping a row" is a transition, not a state. The artboard, the reference PNG and the fixture
   will all be called `<Screen>_<State>`, so the names use letters, digits and underscores only.
 - **Endpoints** — grouped by feature, `endpoint-<kebab>` ids, each with the tier that may call
-  it. A screen that has no endpoint and an endpoint no screen calls are both findings.
+  it (end user, bot, service-to-service) and the minimum role inside that tier. A screen that
+  has no endpoint and an endpoint no screen calls are both findings.
 
 A disagreement found here costs a sentence. The same disagreement found when the fixture
 `Checkout_Empty` has no artboard costs a design round-trip.
@@ -82,67 +83,80 @@ that keep it usable by the generator:
   and error strings before the docs pull request merges; a scenario that already names a
   status code in the brief is a design decision, not an observation, and the table says so.
 - **Every screen's state list is the one from Step 1, verbatim.** Section 5 of the brief is
-  the source both the screen documents (their section 1) and the design brief copy from.
+  what the design brief copies its artboards from and what the screen documents' section 1
+  starts as; before a screen document goes `active`, docs-bootstrap re-reads the states from
+  the real state class, and the code is then the authority. Until there is code, this table is
+  what everything is held against.
+- **Sample data is written once (§5a)**: the names, amounts and the fixed date that the
+  scenarios, the artboards, the previews and the fixtures all show. Without it every one of
+  those invents its own.
 - **Endpoints carry a tier and their errors**, because the shared contract decides both once
   (`kmp-shared-contract`) and a brief that leaves them open leaves them to be decided twice.
 - **Modules follow the project's layout skill**, named, not described: `shared` for the
   contract, `server` for the two builds, `composeApp` for the client — or the existing
   repository's names. What is new is listed; what exists is linked.
-- **Backlog seeds are ordered by dependency**, contract producers first (`docs-bootstrap`'s
-  merge-order rule), each with a size and the feature it belongs to. They become one file per
-  item; a seed that cannot be phrased as an observable result is not ready to be an item.
+- **Backlog seeds are ordered by dependency**, whatever others compile against first, each with
+  a priority, a size, a stage and the feature it belongs to — the fields a backlog item
+  carries, and the stage table `backlog.md` will list. docs-bootstrap chooses the form by
+  size (a milestone checklist for a small backlog, one file per item past a few dozen); a seed
+  that cannot be phrased as an observable result is not ready to be an item. `blocked_by` names
+  seeds only: a design that has to exist first is a seed of its own.
 
-Write it to `brief/technical-brief.md` in the repository when there is one, otherwise hand it
-over as a document. It is an input, not documentation: once `docs-bootstrap` has produced the
-tree, the brief is deleted from the branch — the documents it produced are the ones that get
-checked, and a brief that stays starts describing intent as fact the day the first scenario is
-corrected.
+Write it to `research/brief-technical.md` in the repository when there is one, otherwise hand
+it over as a document. It is a branch artefact in docs-bootstrap's sense: `research/*.md` is
+what its guard refuses on the default branch, so the brief is **deleted before the branch
+merges** — by then the research document holds the decisions, the open pull request holds the
+drafted layers, and a brief that survived would describe intent as fact the day the first
+scenario is corrected.
 
 ## Step 3. Write the design brief
 
 `design-to-compose` carries the template with the reason behind each line:
 [`../design-to-compose/references/design-brief.md`](../design-to-compose/references/design-brief.md).
+One design brief per feature (the template is per feature, and a canvas page is per screen).
 Fill its placeholders from the technical brief and nothing else:
 
-- `<product>`, `<feature>` — from the header.
-- the design system, font and tokens — from the "what exists" answer; a greenfield brief says
-  which font the app will bundle (a Google Fonts family the client can ship) and that the
-  tokens are Material 3 roles until a design system exists, so that the designer's colours are
-  role names the theme can carry.
+- `<product>`, `<feature>` — from the header and the feature block.
+- the design system, font and tokens — from the "what exists" answer. On a greenfield there is
+  no "existing design system" and no screen document yet: replace the template's two phrases
+  with "Material 3 colour and type roles, font `<family>` (§8)" and "the states in §5 of the
+  technical brief", so the designer's colours are role names the theme can carry.
 - **the artboard list** — every `<Screen>_<State>` from Section 5, grouped per screen with the
-  one-line description of what is visible in that state, and the dark variants the product
-  actually has.
-- **sizes** — per form factor from Step 0 (`390×844` phone unless the product says otherwise;
-  a desktop or tablet size only if that platform ships in the first version).
-- **sample data** — the fixture data the brief's scenarios use, with the fixed date, so that
-  the design, the previews and the screenshots show the same names and numbers.
+  one-line description of what is visible in that state, plus `<Screen>_<State>_Dark` for the
+  states Section 5 declares dark variants for.
+- **sizes** — the `Sizes` row of each screen in Section 5; `390×844` is the phone default and
+  every other form factor is a number the interview produced, not one assumed here.
+- **sample data** — §5a, verbatim, with the fixed date.
 
-Write it to `brief/design-brief.md` next to the technical one. It goes to the designer, or to
-Claude Design as the request; what comes back is a canvas, and `design-to-compose` takes it
-from there.
+Write it to `research/brief-design-<feature>.md` next to the technical one, with the same
+lifetime. It goes to the designer, or to Claude Design as the request; what comes back is a
+canvas, and `design-to-compose` takes it from there.
 
 ## Step 4. Check the two against each other, then hand over
 
 Before handing over, in one pass:
 
-- [ ] every screen in the technical brief's Section 5 has an artboard group in the design brief, and every artboard in the design brief is a state in Section 5 — same names, same count
-- [ ] every feature has at least one scenario, and every scenario is marked *target*
-- [ ] every screen names its parent feature and at least one endpoint or an explicit "no API"
-- [ ] every endpoint has a tier and at least one error row
+- [ ] every screen in the technical brief's Section 5 has an artboard group in the design brief, and every artboard stem in the design brief, `_Dark` stripped, is a state of that screen in Section 5 — same names
+- [ ] every feature has at least one scenario, names its modules, and every scenario is marked *target*
+- [ ] every screen names its platforms, an entry per platform, its parent feature, and at least one endpoint or an explicit "no API"
+- [ ] every endpoint group names its contract class and service; every route has a tier, a minimum role and at least one error
+- [ ] §5a has values for every entity the scenarios and screens mention, and a fixed date
 - [ ] the decisions table has a *verified against* or *hypothesis* in every row; no bare claims about versions or library behaviour anywhere else
 - [ ] backlog seeds are ordered so that nothing depends on a later item
 - [ ] nothing private leaks: no internal hostnames, ticket ids or product names the user did not put in the brief
 
-Then say, in a few lines, what to do with each document: the technical brief is the input to
-`docs-bootstrap` (start it in the repository with the brief in the tree; it writes the layers
-from Sections 3–7 and the backlog from Section 9); the design brief goes to the designer or to
-Claude Design; the canvas link that comes back is where `design-to-compose` starts.
+Then say, in a few lines, what to do with each document. The technical brief is research
+material for `docs-bootstrap`, started in the repository with the brief in the tree: it writes
+the research document from §8 and §10 now, drafts the feature, screen, endpoint and service
+documents from §4–§7 in a pull request that stays open until the code gives them their anchors
+(its WORKFLOW, phase 1), and seeds the backlog from §9. The design brief goes to the designer
+or to Claude Design; the canvas link that comes back is where `design-to-compose` starts.
 
 ## What not to do
 
 - **Do not write the documentation instead of the brief.** The brief is a page per layer, with
-  ids and lists; the generator writes the documents with paths into the code, and it can only
-  do that once the code exists.
+  ids and lists; the generator writes the documents, and every layer but research needs a path
+  into the code to pass its check, which only exists once the code does.
 - **Do not invent a state to make a screen look complete.** Four states is normal; a state the
   product does not have becomes an artboard, a fixture and a golden nobody wanted.
 - **Do not describe screens in prose only.** A paragraph cannot be checked against a canvas; a

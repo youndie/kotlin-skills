@@ -143,8 +143,8 @@ something a reviewer can check without opening the canvas.
 ## Step 3. Build the screen the ordinary way
 
 `compose-client-feature`: a stateless `Content` taking `UiState` in and `UiAction` out, a
-previews object with **one fixture state per artboard** (`Empty`, `Data`, `Error`, `Loading`,
-sheet open…), and `@Preview`s built from them. The artboards are the list of states; if the
+previews object with **one fixture state per artboard** (`Loading`, `Empty`, `Content`,
+`Error`, sheet open…), and `@Preview`s built from them. The artboards are the list of states; if the
 design has a state the screen documentation does not, or the other way round, that is a finding
 for the document, not something to paper over in code.
 
@@ -223,7 +223,8 @@ looks like here. Read every later number against that, and write the reading int
 3. The screen document, if the repository keeps one in the docs-bootstrap format: its
    frontmatter gets a `design:` block — `canvas` (the URL), `references` (the `design/`
    directory, as a path from the repository root) and `states` (section-1 state → artboard
-   stem). The checker holds the states against the document and the PNGs against the code.
+   stem; one stem per state, so a `_Dark` reference is not listed and is checked by parity
+   alone). The checker holds the states against the document and the PNGs against the code.
    The parity numbers do **not** go into the document: they are wrong after the next commit
    and nothing would notice; they live in the PR.
 4. The PR description carries `build/reports/screenshots/design/summary.txt` for the screen's
