@@ -17,6 +17,8 @@ testing and design skills lean on; `design-to-compose` needs its `viddikDesignPa
 (viddik 0.5.0 and later).
 `product-brief` writes for [docs-bootstrap](https://github.com/youndie/docs-bootstrap), the
 documentation format and checks the briefs are shaped for.
+`backlog-item` works that format's file-per-item backlog; the reference project keeps no backlog
+of its own, so the pick rule is exercised on the docs-bootstrap example, not on mani.
 
 ## Skills
 
