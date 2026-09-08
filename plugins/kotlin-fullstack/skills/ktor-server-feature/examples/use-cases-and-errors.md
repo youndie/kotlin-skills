@@ -34,7 +34,7 @@ class CreateOrderUseCase(
 
     override suspend fun invoke(params: Params): Result<Order> = suspendRunCatching {
         if (canCreate(CanCreateOrderUseCase.Params(params.workspaceId)).getOrThrow() is PlanCheck.Denied) {
-            throw Error.LimitReached
+            throw Error.LimitReached()
         }
 
         val orderId = transactions.withTransaction {
@@ -42,7 +42,7 @@ class CreateOrderUseCase(
                 AllocateInventoryUseCase.Params(params.order.items, params.workspaceId),
             ).getOrElse { throw it }                     // a nested use case's typed error travels up unchanged
             orders.save(params.order, usage, params.workspaceId)
-        } ?: throw CommonError.SaveFailure
+        } ?: throw CommonError.SaveFailure()
 
         // The outbox carries the id only; the worker rereads the record at delivery time.
         inventorySync.enqueue(orderId, params.workspaceId)
@@ -54,27 +54,31 @@ class CreateOrderUseCase(
             ),
         )
 
-        orders.getById(orderId, params.workspaceId) ?: throw CommonError.SaveFailure
+        orders.getById(orderId, params.workspaceId) ?: throw CommonError.SaveFailure()
     }
 
     /** Named fields: a route cannot pass the caller and the tenant in the wrong order. */
     class Params(val order: CreateOrderParams, val workspaceId: String, val userId: String)
 
-    /** What the route must tell apart. Anything else is a bug and stays an exception. */
+    /**
+     * What the route must tell apart. Anything else is a bug and stays an exception.
+     * Classes, not objects: an `object` exception is one shared instance with one stack trace,
+     * and `addSuppressed` on it mutates global state.
+     */
     sealed class Error : Exception() {
-        data object LimitReached : Error()
+        class LimitReached : Error()
     }
 }
 
 /** Shared by the feature's use cases. */
 sealed class CommonError : Exception() {
-    data object SaveFailure : CommonError()
+    class SaveFailure : CommonError()
 }
 
 class AllocateInventoryUseCase(/* … */) : UseCase<AllocateInventoryUseCase.Params, List<InventoryUsage>> {
     sealed class Error : Exception() {
-        data object NotEnoughInventory : Error()
-        data object InventoryChanged : Error()
+        class NotEnoughInventory : Error()
+        class InventoryChanged : Error()
     }
     /* … */
 }
@@ -86,9 +90,9 @@ class AllocateInventoryUseCase(/* … */) : UseCase<AllocateInventoryUseCase.Par
 /** Lives next to the stock use cases: every route that can hit them maps them the same way. */
 suspend fun RoutingContext.dispatchInventoryError(error: Throwable) {
     when (error) {
-        AllocateInventoryUseCase.Error.NotEnoughInventory -> call.respond(HttpStatusCode.BadRequest, "not enough inventory")
-        AllocateInventoryUseCase.Error.InventoryChanged -> call.respond(HttpStatusCode.Conflict, "inventory has changed")
-        ReleaseInventoryUseCase.Error.ItemNotFound -> call.respond(HttpStatusCode.NotFound, "inventory item not found")
+        is AllocateInventoryUseCase.Error.NotEnoughInventory -> call.respond(HttpStatusCode.BadRequest, "not enough inventory")
+        is AllocateInventoryUseCase.Error.InventoryChanged -> call.respond(HttpStatusCode.Conflict, "inventory has changed")
+        is ReleaseInventoryUseCase.Error.ItemNotFound -> call.respond(HttpStatusCode.NotFound, "inventory item not found")
         else -> throw error          // unknown → StatusPages: reported and answered 500
     }
 }
@@ -97,6 +101,7 @@ suspend fun RoutingContext.dispatchInventoryError(error: Throwable) {
 ## The route dispatches the result
 
 ```kotlin
+// inside fun Route.ordersRouting(): createOrder and reporter resolved once with `by inject`
 post<OrdersResource> {
     withAccess(min = Role.MANAGER) { (user, workspaceId) ->
         val params = call.receive<CreateOrderParams>()
@@ -109,9 +114,9 @@ post<OrdersResource> {
             .onSuccess { call.respond(HttpStatusCode.Created, it) }
             .onFailure { error ->
                 when (error) {
-                    CreateOrderUseCase.Error.LimitReached -> call.respond(HttpStatusCode.BadRequest, ORDER_LIMIT_REACHED)
+                    is CreateOrderUseCase.Error.LimitReached -> call.respond(HttpStatusCode.BadRequest, ORDER_LIMIT_REACHED)
                     is AllocateInventoryUseCase.Error -> dispatchInventoryError(error)
-                    CommonError.SaveFailure -> {
+                    is CommonError.SaveFailure -> {
                         reporter.report(error)                    // unexpected: somebody should look
                         call.respond(HttpStatusCode.InternalServerError, "saving error")
                     }
@@ -147,7 +152,7 @@ class CreateOrderUseCaseTest {
     private val orders = FakeOrderRepository()
     private val inventory = FakeAllocateInventory(result = Result.success(emptyList()))
     private val audit = RecordingLogEvent()
-    private val useCase = CreateOrderUseCase(AlwaysAllowed, orders, stock, NoopTransactionManager, FakeInventorySync(), audit)
+    private val useCase = CreateOrderUseCase(AlwaysAllowed, orders, inventory, NoopTransactionManager, FakeInventorySync(), audit)
 
     @Test
     fun `creates the order and logs the event`() = runTest {
@@ -160,11 +165,11 @@ class CreateOrderUseCaseTest {
 
     @Test
     fun `a stock refusal leaves nothing behind`() = runTest {
-        inventory.result = Result.failure(AllocateInventoryUseCase.Error.NotEnoughInventory)
+        inventory.result = Result.failure(AllocateInventoryUseCase.Error.NotEnoughInventory())
 
         val result = useCase(CreateOrderUseCase.Params(anOrder(), "ws-1", "u-1"))
 
-        assertEquals(AllocateInventoryUseCase.Error.NotEnoughInventory, result.exceptionOrNull())
+        assertIs<AllocateInventoryUseCase.Error.NotEnoughInventory>(result.exceptionOrNull())
         assertTrue(orders.saved.isEmpty(), "the order was saved although inventory was refused")
         assertTrue(audit.events.isEmpty(), "an event was logged for an order that does not exist")
     }
@@ -173,7 +178,7 @@ class CreateOrderUseCaseTest {
     fun `a save that returns nothing is a SaveFailure`() = runTest {
         orders.saveReturnsNull = true
 
-        assertEquals(CommonError.SaveFailure, useCase(CreateOrderUseCase.Params(anOrder(), "ws-1", "u-1")).exceptionOrNull())
+        assertIs<CommonError.SaveFailure>(useCase(CreateOrderUseCase.Params(anOrder(), "ws-1", "u-1")).exceptionOrNull())
     }
 }
 ```

@@ -91,7 +91,7 @@ class MongoTransactionRepository(mongoDatabase: MongoDatabase) : TransactionRepo
         )
     }
 
-    override suspend fun delete(id: String): Boolean = db.deleteById(id)
+    override suspend fun delete(id: String): Boolean = db.deleteById(id)   // a project extension over deleteOne(eq("_id", ObjectId(id)))
     override suspend fun deleteByUser(userId: String) { db.deleteMany(Filters.eq(TransactionDb::userId.name, userId)) }
 
     private fun mapToDb(transaction: Transaction, id: ObjectId = ObjectId(), userId: String) = TransactionDb(
@@ -101,6 +101,8 @@ class MongoTransactionRepository(mongoDatabase: MongoDatabase) : TransactionRepo
         userId = userId, categoryId = transaction.category.id,
     )
 
+    // `toBigDecimal` here is the multiplatform decimal library's String extension (import it explicitly:
+    // in jvmMain the name otherwise resolves to java.math through kotlin.text).
     private fun TransactionDb.toRecord() = TransactionRecord(
         id = id.toHexString(), amount = amount.toPlainString().toBigDecimal(), income = income,
         date = LocalDate.parse(date), until = until?.let(LocalDate::parse),

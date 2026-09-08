@@ -1,6 +1,6 @@
 ---
 name: kmp-project-structure
-description: "Lay out or restructure a Kotlin Multiplatform full-stack project: which Gradle modules to create (a shared wire contract, a Compose Multiplatform client, a server-common module and one module per server build), which targets each module takes, what belongs in commonMain versus a platform source set, how feature packages are shaped across modules, and where configuration and the product version live. Use this whenever the user starts a new KMP project, adds a module or a target, asks where a class or file belongs, wants to split or merge modules, or asks about package structure — even when they only say 'set up the project' or 'organise the code'."
+description: "Lay out or restructure a Kotlin Multiplatform project: Gradle modules (shared contract, Compose client, server-common plus one module per server build), targets, commonMain versus platform source sets, feature packages, the library-scale module cut. Use for 'set up the KMP project', 'add a module or target', 'where does this class go', 'split the module' in Kotlin/Gradle code."
 ---
 
 # Kotlin Multiplatform project structure
@@ -49,8 +49,8 @@ Why each boundary exists:
   elsewhere. See `kmp-shared-contract`.
 - **The server is compiled twice from one source, not written twice.** Only code with two
   implementations can diverge; confining the second implementation to the storage module confines
-  the risk to one module. The JVM build also stays the one that compiles on macOS, so a Mac does
-  not need a Linux machine for every run.
+  the risk to one module. The JVM build also stays buildable where the native target cannot link
+  (the native driver may publish for one OS only).
 - **`:server-common` has no `main` and builds no image.** The Ktor Gradle plugin, jib and
   `application` work only with `kotlinJvm` and do not apply to a KMP module; the native build
   needs its own Dockerfile anyway. Each build module owns entry point, storage module and packaging.
@@ -61,22 +61,12 @@ Why each boundary exists:
 A single-target project (JVM server only, Android only) keeps the same package shape inside fewer
 modules; the boundaries above are worth drawing the day a second target appears, not before.
 
-**A server that ships as a library** (an identity provider, a platform component other services
-embed) cuts further, and the cut follows the same rule, "a module per thing that can vary":
-
-| Module | What it is |
-|---|---|
-| `:core` | domain: models, the storage **ports** (`port/`), `TransactionManager`, use cases by feature, the DI modules that bind them; no driver, no HTTP |
-| `:crypto`, `:shared-*` | pure libraries the core depends on, and the contracts consumers import |
-| `:storage-<driver>-core`, `:storage-<driver>-<db>` | the repositories written against one driver, and one thin module per database bringing its driver and its schema; a native binary cannot link two drivers |
-| `:server` | the Ktor surface: routes, plugins, the two engines; it knows `:core` and nothing about drivers |
-| `:server-boot` | the composition root function (`runService(storage = …, authMethods = …)`) and the environment reading |
-| `:auth-<method>` | optional capabilities as modules: present on the classpath means available, absent means impossible |
-| `:distribution-*` | one `Main.kt` and one dependency list each; the dependency list **is** the feature set |
-| `:cli`, `:client` | consumers of the shared contracts, built in the same repository so they cannot drift |
-
-The property this buys: a capability that is not in the distribution's dependency list cannot be
-switched on by any configuration, because the code is not in the binary.
+**A server that ships as a library** (an identity provider other services embed) cuts further,
+into `core` with the ports, one storage module per driver plus one per database, `server`,
+`server-boot` with the composition root, optional `auth-*` capability modules and one
+`distribution-*` per deliverable, so that a capability not on a distribution's classpath cannot
+be switched on by configuration. The table is in
+[references/module-layout.md](references/module-layout.md), "A library-style server".
 
 ## The one rule that shapes the source sets
 
@@ -117,14 +107,13 @@ screens. A module-specific root (`...mani.server`, `...mani.client`) buys nothin
 ```
 shared/src/commonMain/kotlin/<root>/
   feature/<name>/          <Name>Resource.kt, DTOs, enums
-  utilz/                   serializers, suspendRunCatching
-  today.kt                 pure functions both sides need
+  utilz/                   serializers and pure helpers both sides need (suspendRunCatching, today())
 
 server-common/src/commonMain/kotlin/<root>/
-  ManiApp.kt               coreModule(), configurePlugins(), configureAuth(), apiRouting()
-  config/                  Config.fromEnv(), expect readEnv
-  security/                token service, bearer provider, encoding helpers
-  feature/<name>/          <Name>Routing.kt, Rules.kt, data/<Name>Repository.kt (the port)
+  App.kt                   coreModule(), configurePlugins(), configureAuth(), apiRouting()
+  config/                  Config from ENV, expect readEnv
+  security/                token service, bearer provider, access helper, role gates
+  feature/<name>/          <Name>Routing.kt, Rules.kt, domain/ (use cases, the port), data/ only if driver-free
 server/src/main/kotlin/<root>/
   Application.kt           main + module()
   MongoStorageModule.kt    the ports bound to this build's driver
@@ -180,7 +169,7 @@ hierarchy. The test: a package at the root is one that several features import a
 - **`api` for types that appear in the contract's public signatures.** If `Transaction.amount`
   is a `BigDecimal` from a library, `:shared` declares that library with `api`, or every consumer
   must declare it too and the versions drift apart silently.
-- **Declare the crypto provider in every build module**, not only where it arrives
+- **Declare `cryptography-kotlin`'s provider in every build module**, not only where it arrives
   transitively. A missing provider does not fail the build; it fails the first login.
 - **One product version.** `mani.version` in `gradle.properties` is the only number: a Gradle task
   generates a `const val` from it into `:server-common`, the `/health` route reports it, the image
@@ -198,24 +187,12 @@ hierarchy. The test: a package at the root is one that several features import a
 
 ## Configuration
 
-Both server builds read **the environment**, through one `Config.fromEnv()` in `commonMain` with
-`readEnv` as the only `expect`. HOCON is read by JVM-only Ktor code, so a second configuration
-mechanism would be the first thing to diverge. Conventions worth copying:
-
-- a `data class` per concern (`MongoConfig`, `JWTConfig`) nested in one `Config`, so tests build
-  a config in code rather than by setting variables;
-- a decision that depends on a value (what to do when `JWT_SECRET` is unset) lives in a small
-  named function that takes the value as a parameter, so a test checks the decision without
-  touching the environment of the machine it runs on;
-- an unset secret is **a random per-process value plus a line on stdout**, not an insecure literal
-  default and not a refusal to start: the instance keeps working locally, the price (a restart
-  logs everyone out) is visible, and production sets the variable;
-- credentials are URL-escaped before they go into a connection string; a password with `@` or
-  `:` otherwise sends the connection somewhere else.
-
-On the client the server address is resolved at runtime where the platform can answer (the
-browser: the page's origin; desktop: an environment variable) and falls back to a compiled-in
-default kept in the client, not in the contract.
+One typed configuration per service, built in one place: from the environment on a two-build
+server (HOCON is JVM-only), from typed HOCON properties on a JVM-only one. Nested data classes
+per concern so tests build a config in code; a required secret has no default; the client's
+server address is resolved at runtime where the platform can answer and falls back to a
+compiled-in default kept in the client, not in the contract. The rules and code are in
+`ktor-server-feature` ("Configuration and secrets"); this file only says where it lives.
 
 ## What not to do
 

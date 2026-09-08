@@ -104,8 +104,8 @@ interface RuleRepository {
 
 /** A preference other screens format by: observed, never read once. */
 interface DisplayCurrencyRepository {
-    fun observe(): Flow<Currency>
-    suspend fun set(currency: Currency)
+    fun observeCurrency(): Flow<Currency>
+    suspend fun setCurrency(currency: Currency)
 }
 ```
 
@@ -123,7 +123,7 @@ class DeleteRulesUseCase(private val repository: RuleRepository) : BaseUseCase<L
 }
 
 class ObserveDisplayCurrencyUseCase(private val repository: DisplayCurrencyRepository) : ObservableUseCase<Unit, Currency> {
-    override fun invoke(params: Unit): Flow<Currency> = repository.observe()
+    override fun invoke(params: Unit): Flow<Currency> = repository.observeCurrency()
 }
 ```
 
@@ -233,8 +233,11 @@ class RulesListViewModel(
         val deleteDialogVisible: Boolean = false,
     )
 
+    /** A failing source completes after writing its error into the flags; combine keeps its last value. */
+    private fun <T> Flow<T>.reported(): Flow<T> = catch { e -> uiFlags.update { it.copy(errorMessage = mapper.toMessage(e)) } }
+
     val uiState: StateFlow<RulesListUiState> =
-        combine(observeRulesUseCase(Unit), observeDisplayCurrencyUseCase(Unit), selected, uiFlags) { rules, currency, selected, flags ->
+        combine(observeRulesUseCase(Unit).reported(), observeDisplayCurrencyUseCase(Unit).reported(), selected, uiFlags) { rules, currency, selected, flags ->
             val simulated = rules.simulate()
             RulesListUiState(
                 days = simulated.mapValues { (_, day) -> day.map { mapper.toItem(it, currency) }.toImmutableList() }.toImmutableMap(),
@@ -245,10 +248,13 @@ class RulesListViewModel(
                 deleteDialogVisible = flags.deleteDialogVisible,
             )
         }
-            .flowOn(Dispatchers.Default)
+            // No flowOn(Dispatchers.Default) here: a hardcoded dispatcher makes the derivation
+            // run on a real thread and turns `runCurrent()` in tests into a race. Heavy mapping
+            // takes a CoroutineDispatcher constructor parameter (no default) bound by the module.
             .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), RulesListUiState(loading = true))
 
     init {
+        // One explicit first load: there is no input StateFlow in the trigger here to emit for us.
         viewModelScope.launch { refreshTrigger.receiveAsFlow().collectLatest { load() } }
         refreshTrigger.trySend(Unit)
     }
@@ -321,9 +327,11 @@ fun RulesListContent(
 ) {
     val snackbarHostState = remember { SnackbarHostState() }
 
-    LaunchedEffect(state.errorMessage) {
-        state.errorMessage?.let { message ->
-            snackbarHostState.showSnackbar(message.resolve())
+    // resolve() is @Composable, so it runs here and the plain String goes into the effect.
+    val errorText = state.errorMessage?.resolve()
+    LaunchedEffect(errorText) {
+        if (errorText != null) {
+            snackbarHostState.showSnackbar(errorText)
             onAction(RulesListUiAction.ErrorDismissed)
         }
     }
@@ -396,6 +404,24 @@ data class AccountDetailsUiState(
 
 The view model then has `uiFlags`, `fetchedData` (the summary and transactions fetched per
 selection), `dialogsState` (what a sheet is showing) and the input flows (`selectedAccountId`,
-`timeframe`) as separate `MutableStateFlow`s, all joined in one `combine`; the load runs in
-`combine(selectedAccountId, accounts, timeframe).distinctUntilChanged().collectLatest { }`, so a
-change of selection cancels the previous fetch.
+`timeframe`) as separate `MutableStateFlow`s, joined in one `combine`. The typed `combine`
+overloads take at most five flows, so group related inputs first
+(`combine(selectedAccountId, timeframe, ::Pair)`) or nest one `combine` in another. The load
+runs in `combine(selectedAccountId, accounts, timeframe).distinctUntilChanged().collectLatest { }`,
+so a change of selection cancels the previous fetch.
+
+## What was replaced, and why
+
+Shapes that looked like reuse in the reference project and were dropped:
+
+- a `UseCase<P,T>` base with `get()` that rethrows and `getOrNull()`: callers bypass `Result`
+  and the failure path goes untested;
+- a `FlowUseCase` hardcoding `Dispatchers.IO` and wrapping every emission in `Result`:
+  untestable threading, errors hidden at the interface;
+- a `DataSource<T : WithId>` plus `BaseFlowRepository<T>` CRUD generic: a marker interface on
+  the model, erased generics forcing named DI bindings, every feature bent into a list;
+- a `CommonUiState<T>` / `DataState<T>` base state: `setError()` built a fresh object and erased
+  the data on screen, and the compiler could not check what a screen's state needs.
+
+`today()` in the snippets is `Clock.System.todayIn(TimeZone.currentSystemDefault())`, a
+one-line helper both sides of the product share.

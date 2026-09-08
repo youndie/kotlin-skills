@@ -5,11 +5,13 @@ shared wire contract, Ktor servers compiled to the JVM and to Kotlin/Native, Com
 clients, the testing that holds all of it together, and the naming and abstraction conventions
 underneath.
 
-Every rule in these skills was paid for in
-[mani](https://github.com/youndie/mani-kotlin-fullstack): a budget planner with a Compose client
-for Android, iOS, desktop and the browser, one server compiled twice, and one contract module
-shared by all of them. The skills describe what worked there and **why**, with the defect that
-motivated each rule named next to it. Where a rule is specific to that product, the skill says so.
+Two sources. The public one is [mani](https://github.com/youndie/mani-kotlin-fullstack): a
+budget planner with a Compose client for Android, iOS, desktop and the browser, one server
+compiled twice, and one contract module shared by all of them; its code is the reference for the
+two-build mechanics, the contract and the platform plumbing. The larger patterns (use cases with
+typed errors, tenancy and role tiers, derived view-model state) come from production services
+and apps that are not public; they are described generically, with the defect that motivated
+each rule named next to it. Where a rule is specific to one product, the skill says so.
 
 ## Skills
 
@@ -50,7 +52,9 @@ claude plugin install kotlin-fullstack@kotlin-skills
 ```
 
 The skills then appear as `/kotlin-fullstack:<skill>` and trigger on their own when a task
-matches.
+matches. If you already have personal skills with the same names, the plugin namespace keeps
+them apart, but Claude picks between two matching descriptions by description alone; retire or
+rename the older one.
 
 Or without the plugin machinery, by linking each skill into your personal skills directory:
 
@@ -64,7 +68,7 @@ for s in plugins/kotlin-fullstack/skills/*; do ln -s "$(pwd)/$s" ~/.claude/skill
 .claude-plugin/marketplace.json          the marketplace: one plugin
 plugins/kotlin-fullstack/
   .claude-plugin/plugin.json
-  skills/<name>/SKILL.md                 the skill (kept under ~300 lines)
+  skills/<name>/SKILL.md                 the skill (kept under ~400 lines)
   skills/<name>/examples/*.md            longer code, lifted from the reference project
   skills/<name>/references/*.md          build-file skeletons, grep checklists
 ```
@@ -76,8 +80,9 @@ plugins/kotlin-fullstack/
   described.
 - Nothing here describes a particular machine. A quirk that does not reproduce in CI is not a
   rule.
-- Code in `examples/` is trimmed from the reference project with comments translated; it is
-  illustrative, not a library.
+- Code in `examples/` is either trimmed from the reference project with comments translated, or
+  written for this repository in a fictional domain; each file says which. It is illustrative,
+  not a library, and assumes Kotlin 2.2+, Ktor 3.x, Koin 4.x.
 
 ## License
 

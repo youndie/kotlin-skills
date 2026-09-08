@@ -8,6 +8,7 @@ val networkModule = module {
             install(ContentNegotiation) { json(Json { ignoreUnknownKeys = true; isLenient = true }) }
             install(Auth) {
                 bearer {
+                    // realm filters WWW-Authenticate challenges: refresh runs only for this realm.
                     realm = serverConfig.host
                     loadTokens { get<TokenRepository>().getToken() }
                     refreshTokens { refreshSession(get(), get()) { markAsRefreshTokenRequest() } }
@@ -123,8 +124,11 @@ interface TokenStorage {
 expect val authModulePlatform: Module
 
 val authModule = module {
-    single<TokenStorage> { TokenStorageCommon() }       // a no-op default; the platform module overrides it
+    single<TokenStorage> { TokenStorageCommon() }       // a no-op default for platforms without a store
     single<TokenRepository> { TokenRepositoryCommon(get()) }
+    // Included AFTER the default on purpose: Koin keeps the last definition of a type, so the
+    // platform's TokenStorage wins. Move this line above the default and every platform loses
+    // its tokens on restart, silently.
     includes(authModulePlatform)
     singleOf(::LogoutUseCase)
     // Here, not in the sign-in screen's module: AuthViewModel is shared by sign-in and sign-up,

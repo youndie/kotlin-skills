@@ -1,6 +1,6 @@
 ---
 name: kmp-shared-contract
-description: "Design or change the wire contract between a Ktor server and its Kotlin clients: `@Resource` path classes and DTOs declared once in a shared module and used by both sides, serializers for money and dates, what must stay out of the contract, status-code conventions, and the checklist for changing a route or a field without breaking a client or a second server build. Use this whenever the user adds, renames or removes an endpoint, adds a field to a model, asks how the client and the server talk to each other, mentions the shared / contract / api module, or reports that the client and the server disagree about a path or a field."
+description: "Design or change the wire contract between a Ktor server and Kotlin clients: @Resource path classes and DTOs in a shared module, money and date serializers, what stays out of the contract, status codes and wire Json settings, the checklist for changing a route or a field. Use for 'add/rename an endpoint's path or DTO', 'add a field to the model', 'client and server disagree', the shared/contract/api module."
 ---
 
 # The shared wire contract
@@ -50,7 +50,17 @@ httpClient.patch(TransactionResource.ById(id = params.id)) { setBody(params) }
 A string path on the second side is a copy of the contract that rots silently: a rename compiles
 and fails at runtime, for a user. With a shared `@Resource` it fails at compile time, and query
 parameters stop being assembled by hand. Sub-resources nest with a `parent` parameter that has a
-default, so `AuthResource.Refresh()` is enough on the client.
+default, so `AuthResource.Refresh()` is enough on the client. Query parameters are constructor
+properties with defaults:
+
+```kotlin
+@Resource("/orders")
+class OrdersResource(val page: Int? = null, val pageSize: Int? = null, val search: String? = null) {
+    @Resource("{id}")
+    class ById(val parent: OrdersResource = OrdersResource(), val id: String)
+}
+// server: get<OrdersResource> { r -> r.page ?: 0 }   client: httpClient.get(OrdersResource(page = 2))
+```
 
 The same argument applies to DTOs: **give a path, not a copy**. A local "copy of the response so I
 do not have to touch the shared module" is not a compromise, it is a future bug.
@@ -71,7 +81,7 @@ do not have to touch the shared module" is not a compromise, it is a future bug.
 |---|---|---|
 | the server's address | a server has no use for its own address; a module called the contract should be one | the client (`Constants.kt` plus a runtime override) |
 | the record owner's id (`userId`) | ownership is a server-side notion; the client never sees it | a server-side `Record` type next to the port |
-| validation and business rules | the form is a convenience; the boundary is the server | `Rules.kt` in the server's feature package |
+| validation and business rules | the form is a convenience; the boundary is the server | a `xProblem()` function and typed use-case errors in the server's feature package |
 | repository interfaces, use cases, exceptions | the contract describes the wire, not how a side is layered; otherwise the client depends on the server's layering | each side's own feature package |
 | UI state, formatting | presentation | the client |
 | the storage document shape | the database is a third party to the contract | each server build's `data/` |
@@ -103,6 +113,12 @@ Mapping happens at each edge, and none of the three leaks into the others.
   keeps parsing a newer server's answer and vice versa. The client's `Json` sets
   `ignoreUnknownKeys = true`; the server's `Json` does **not** set `isLenient`, because a server
   that guesses what an unquoted body meant serves only whoever bypasses the real clients.
+- **The wire `Json` is configured once per side and the settings are a contract decision.**
+  Server: `encodeDefaults = true` (kotlinx does not write defaulted fields, and a typed client
+  where the field is mandatory fails to parse), `explicitNulls = false` or `true` chosen once
+  (absent vs `null` is a different document for a generated client), `ignoreUnknownKeys = true`,
+  and **no `isLenient`**. Client: `ignoreUnknownKeys = true`. Two entry points with different
+  settings are two wire formats, and nothing but the client notices.
 - **A sentinel in the contract is a product decision.** `Category.default = Category("0",
   "Default")` is what the server substitutes when a record's category no longer exists. Write
   such a decision down where the sentinel is declared; a reader otherwise takes it for a
@@ -110,8 +126,8 @@ Mapping happens at each edge, and none of the three leaks into the others.
 
 ## Status-code conventions
 
-These are the reference product's; keep whatever the project already does, but make sure each
-answer below has *a* decision.
+This table is the one place the decision lives; the server skill links here. Keep whatever the
+project already does, but make sure each answer below has *a* decision.
 
 | Situation | Answer | Why |
 |---|---|---|
@@ -119,8 +135,9 @@ answer below has *a* decision.
 | a validation rule refused the input | `400` with a **human-readable text that says what to fix** | the form shows the text as is |
 | the body or a path parameter did not parse | `400 Malformed request`, one generic text | details would describe the server's internals |
 | no token, wrong kind of token, expired | `401` with one fixed text | the client's refresh logic keys on the code, not the text |
-| not yours **or** does not exist | `403`, the same for both | different answers would say which ids are taken |
+| not yours **or** does not exist | one status for both, everywhere in the service: `404` when the tenant is in every filter and the two are indistinguishable anyway; `403` in the reference, which checks ownership explicitly | different answers would say which ids are taken |
 | the refresh token was refused | `401`: the session is over; **any other failure leaves the session alone** | a `500` on the server does not end a session |
+| created but not readable by its own id | `500` | a storage failure, not a client error; it is reported |
 
 **The id of the record being changed comes from the path, never from the body.** The reverse
 was a real hole: ownership checked against the path, the write addressed by the body, and a
@@ -128,7 +145,8 @@ stranger's record rewritten with a `200`.
 
 ## Health as part of the contract
 
-Two resources, two questions:
+Two resources, two questions (`/health` and `/health/ready`; the paths are the contract's, the
+server skill only links here):
 
 - `GET /health` answers **which build is running**: `Health(build, version, uptimeSeconds)`. No
   authentication, no dependencies touched: a liveness probe must not depend on the database, or
@@ -150,11 +168,14 @@ live fact rather than a README sentence.
    test in each build (`kmp-testing`, "storage is tested against a real database").
 5. If the repository keeps an API reference (`docs/api/endpoint-*.md`), update the route table,
    the status codes and the auth tier in the same change.
-6. Run the grep that guards the whole thing: string literals containing your API prefix outside
-   the contract module must be zero.
+6. Run the grep that guards the whole thing: no route registered by a string path on the
+   server, no request built from a string path on the client. First confirm the grep finds the
+   typed calls (positive control), then that the string forms are absent:
 
 ```bash
-grep -rn --include='*.kt' '"/api' server*/src composeApp/src | grep -v '/shared/'
+grep -rnE --include='*.kt' '\b(get|post|put|patch|delete)<' server*/src | head -3     # typed routes exist
+grep -rnE --include='*.kt' '\b(get|post|put|patch|delete|route)\("/' server*/src        # must be empty (health excepted)
+grep -rnE --include='*.kt' '\.(get|post|put|patch|delete)\("' client*/src composeApp/src  # must be empty
 ```
 
 7. Do not delete a resource because nobody calls it yet without checking the handler: a resource

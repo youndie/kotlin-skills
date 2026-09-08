@@ -1,6 +1,6 @@
 ---
 name: kmp-testing
-description: "Write, place and run tests in a Kotlin Multiplatform project with a Ktor server (JVM and/or Kotlin/Native) and a Compose Multiplatform client: which suite a test belongs in, kotlin.test over JUnit, hand-written fakes instead of mocks, storage tested against a real database through the raw document, one test per build for anything with two implementations, view-model tests with a test dispatcher, MockEngine tests that mirror the production client, Compose UI tests on stateless Content, screenshot tests, Koin graph tests, and how to prove a test guards something by mutation. Use this whenever the user asks to write a test, add coverage, test a view model, route, repository or screen, set up screenshot tests, or asks why a green build did not catch a bug."
+description: "Write, place and run tests in a Kotlin Multiplatform project with a Ktor server and a Compose client: which suite a test belongs in, kotlin.test, fakes versus mocks, storage against a real database through the raw document, one test per build, view-model tests over stateIn, MockEngine, Compose UI tests on Content, screenshots, Koin graph tests, mutation checks. Use for 'write a test', 'add coverage', 'test the view model / route / repository / screen', 'why did the green build miss this bug'."
 ---
 
 # Testing a Kotlin Multiplatform product
@@ -8,8 +8,11 @@ description: "Write, place and run tests in a Kotlin Multiplatform project with 
 One source tree builds several artefacts: clients for four platforms and a server compiled twice.
 That is what makes testing here different from the usual: **shared code does not have one test
 suite**, and where a test lives is decided by the platforms it must run on. The reference is
-`docs/TESTING.md` in [mani](https://github.com/youndie/mani-kotlin-fullstack); every trap below
-was hit there first.
+`docs/TESTING.md` in [mani](https://github.com/youndie/mani-kotlin-fullstack); the server-side
+traps come from larger services and are written generically.
+
+Map: the first half is common and server (stack, placement, naming, fakes, storage, two builds);
+the client starts at "Client: view models". Read the half that applies.
 
 ## Step 0. Check the project first
 
@@ -26,12 +29,12 @@ was hit there first.
 
 | For | Use |
 |---|---|
-| annotations and assertions | `kotlin.test` — never `org.junit`, including in JVM-only tests; `org.junit` nails a test to the JVM and moving it later means rewriting it |
+| annotations and assertions | `kotlin.test` — never `org.junit`, including in JVM-only tests; `org.junit` nails a test to the JVM and moving it later means rewriting it. The one documented exception: a per-class database fixture, which `kotlin.test` cannot express (`@BeforeAll`) |
 | coroutines | `kotlinx-coroutines-test` (`runTest`, `StandardTestDispatcher`, `runCurrent`) |
 | server routes | `ktor-server-test-host` (`testApplication`) — published for native targets too |
 | client networking | `ktor-client-mock` (`MockEngine`) |
 | a database for server tests | an embedded `mongod` on the JVM (flapdoodle); a containerised one for the native build |
-| the dependency graph | `koin-test` (`verify()` on the JVM, `checkModules()` on native) |
+| the dependency graph | a test that **resolves** every injected type from `koinApplication { }`; `koin-test`'s `verify()` only as a cheap first pass |
 | client settings | `multiplatform-settings-test` (`MapSettings`) |
 | screens | `compose.uiTest` (`runComposeUiTest`) |
 | screenshots | [viddik](https://github.com/youndie/viddik) or whatever the project has |
@@ -42,9 +45,9 @@ the build that ships unchecked, so shared suites use hand-written fakes. In a JV
 (an Android-only client, a `jvmTest` of a UI module) mocks are acceptable for wide interfaces;
 even there a fake that holds state usually reads better than `coVerify(exactly = 1)`. **A
 Flow-testing library** (Turbine is multiplatform) is a convenience, not a requirement: a
-`StateFlow` can be read with `runCurrent()` and `.value`; Turbine earns its place when the
-*sequence* of states matters or when the state is a `stateIn(WhileSubscribed)` flow (see the
-view-model section).
+`StateFlow` can be read with `runCurrent()` and `.value`; Turbine (`app.cash.turbine`) earns its
+place when the *sequence* of states matters or when the state is a `stateIn(WhileSubscribed)`
+flow (see the view-model section).
 
 ## Where a test lives
 
@@ -57,6 +60,9 @@ view-model section).
 | `:server-native:linuxX64Test` + `linuxX64ReleaseTest` | native, debug **and release** | the native build end to end |
 | `:composeApp:desktopTest` | JVM | view models, use cases, cache, token storage, the Koin graph — once is enough |
 | `:composeApp:commonTest` | desktop, wasm, iOS | what breaks per platform: navigation graph stability, number formatting, Content tests |
+
+The table is the reference's; in a project cut into `feature-x-domain / -data / -ui` modules
+each module has its own `commonTest` or `jvmTest`, and the rules are the same per module.
 
 Rules of placement:
 
@@ -75,8 +81,9 @@ A name is an English sentence in backticks stating the property under test:
 @Test fun `a rule the product cannot honour is refused`()
 ```
 
-**No commas** in a backticked name: Kotlin/Native rejects them when compiling the test, and only
-the native target fails, so a JVM run does not catch it. A long, listy name goes camelCase.
+**No commas** in a backticked name: the Kotlin/Native test compilation rejects them
+(`Name contains illegal characters`), and only the native target fails, so a JVM run does not
+catch it. A long, listy name goes camelCase.
 
 Above the test, a KDoc naming **the failure the test guards**, not restating the code:
 
@@ -196,20 +203,26 @@ binary was the debug one, and the image ships the release one.
 
 ## Client: view models
 
-The view model is built **directly** with fakes (or, in a JVM-only suite, mocks) of its use
-cases; no DI graph. `Dispatchers.setMain` is replaced **before** construction: `init` already
-launches into `viewModelScope`.
+The view model is built **directly**, with **real use cases over fake repositories**: use cases
+are final classes and thin, the repository interface is the seam that already exists for them,
+and the test then covers the use case too. (In a JVM-only suite a mock of the use case class is
+acceptable; a suite that compiles to native cannot mock.) `Dispatchers.setMain` is replaced
+**before** construction: `init` already launches into `viewModelScope`.
 
 ```kotlin
-private val accounts = MutableStateFlow<List<Account>>(emptyList())      // what ObserveAccountsUseCase returns
-private val refresh = FakeRefreshAccountsUseCase(result = Result.success(Unit))
+private val repository = FakeAccountRepository()                 // observe/refresh shape; holds a MutableStateFlow
+private fun createViewModel() = AccountsListViewModel(
+    observeAccountsUseCase = ObserveAccountsUseCase(repository),
+    refreshAccountsUseCase = RefreshAccountsUseCase(repository),
+    observeCurrenciesUseCase = ObserveCurrenciesUseCase(repository),
+)
 
 @Test
 fun `uiState should filter out unapproved accounts`() = runTest(testDispatcher) {
-    accounts.value = listOf(approved, open, closed)
+    repository.accounts.value = listOf(approved, open, closed)
     val viewModel = createViewModel()
 
-    viewModel.uiState.test {
+    viewModel.uiState.test {                                      // Turbine
         var state = awaitItem()
         while (state.totalAccounts == 0) state = awaitItem()   // skip the initial value and the loading states
 
@@ -235,7 +248,9 @@ upstream `combine` has not started. Collect it: `uiState.test { }`, or
 The test that "passes" against the initial value guards nothing.
 
 Wait with a loop over a condition, not with `advanceTimeBy` and a guessed number: the condition
-describes what you wait for, the number describes today's implementation. The three things worth
+describes what you wait for, the number describes today's implementation. Bound the loop (an
+iteration cap with a message): a `while (...) runCurrent()` that never becomes true never
+suspends either, so `runTest`'s timeout cannot end it and the suite hangs. The three things worth
 a test per screen: the derivation (push values into the fake flows, assert the derived state),
 the flags (an action flips a flag and only that flag), and the events (an action emits the right
 event and nothing lands in the state). The mapper is tested on its own, as a pure function.

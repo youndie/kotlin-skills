@@ -279,6 +279,12 @@ class OrdersRoutePostTest {
 ## A real database per test class (JVM) and a URL from the environment (native)
 
 ```kotlin
+/**
+ * One embedded mongod per test class. This is the documented exception to "kotlin.test only":
+ * a per-class fixture needs JUnit 5's @BeforeAll/@AfterAll (kotlin.test has @BeforeTest per
+ * test, and starting mongod per test costs seconds each). It stays in a JVM-only suite, where
+ * the constraint that motivates kotlin.test does not apply.
+ */
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 abstract class BaseMongoRepositoryTest {
     private lateinit var running: TransitionWalker.ReachedState<RunningMongodProcess>

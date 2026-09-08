@@ -1,56 +1,41 @@
 # Client tests: view model, networking, Compose UI, screenshots, the graph
 
-## A reusable fake repository (`desktopTest`)
+## A fake repository of the observe/refresh shape, and the view model over real use cases
 
 ```kotlin
-class FakeTransactionsRepository(
-    private val shouldCrash: () -> Boolean = { false },
-    private val transactions: List<Transaction> = listOf(/* two fixtures */),
-) : TransactionRepository {
-    private val data = MutableStateFlow(emptyList<Transaction>())
-    override val dataStateFlow: StateFlow<List<Transaction>> = data
+class FakeAccountRepository : AccountRepository, CurrencyRepository {
+    val accounts = MutableStateFlow<List<Account>>(emptyList())
+    val currencies = MutableStateFlow<List<Currency>>(emptyList())
+    var refreshResult: Result<Unit> = Result.success(Unit)
+    var refreshCalls = 0
 
-    override suspend fun load() {
-        if (shouldCrash()) throw RuntimeException("fake")
-        data.value = transactions
-    }
-    override fun getById(transactionId: String): Transaction = data.value.first { it.id == transactionId }
-    override suspend fun create(params: Transaction): Transaction { if (shouldCrash()) throw RuntimeException("fake"); data.value += params; return params }
-    override suspend fun update(params: Transaction): Boolean { data.value = data.value - getById(params.id) + params; return true }
-    override suspend fun delete(transactionId: String): Boolean { data.value -= getById(transactionId); return true }
-    override fun reset() { data.value = emptyList() }
-    override val showingCacheFrom = MutableStateFlow<Instant?>(null)
+    override fun observeAccounts(clientId: Long): Flow<List<Account>> = accounts
+    override suspend fun refreshAccounts(clientId: Long) { refreshCalls++; refreshResult.getOrThrow() }
+    override suspend fun getAccount(accountId: Long): Account? = accounts.value.firstOrNull { it.id.value == accountId }
+    override fun observeCurrencies(): Flow<List<Currency>> = currencies
 }
 ```
 
-## View model: fakes of the use cases, the derived state collected
-
 ```kotlin
-private class FakeRefreshAccountsUseCase(var result: Result<Unit> = Result.success(Unit)) : RefreshAccountsUseCase {
-    var calls = 0
-    override suspend fun invoke(params: Unit): Result<Unit> { calls++; return result }
-}
-
 @OptIn(ExperimentalCoroutinesApi::class)
 class AccountsListViewModelTest {
     private val testDispatcher = StandardTestDispatcher()
-    private val accounts = MutableStateFlow<List<Account>>(emptyList())
-    private val currencies = MutableStateFlow<List<Currency>>(emptyList())
-    private val refresh = FakeRefreshAccountsUseCase()
+    private val repository = FakeAccountRepository()
 
     @BeforeTest fun setUp() = Dispatchers.setMain(testDispatcher)   // before the view model exists
     @AfterTest fun tearDown() = Dispatchers.resetMain()
 
+    /** Real use cases over the fake: the test covers them too, and nothing needs mocking. */
     private fun createViewModel() = AccountsListViewModel(
-        observeAccountsUseCase = ObservableUseCase { accounts },
-        refreshAccountsUseCase = refresh,
-        observeCurrenciesUseCase = ObservableUseCase { currencies },
+        observeAccountsUseCase = ObserveAccountsUseCase(repository),
+        refreshAccountsUseCase = RefreshAccountsUseCase(repository),
+        observeCurrenciesUseCase = ObserveCurrenciesUseCase(repository),
     )
 
     /** The derivation: what comes out of the combine for a given input. */
     @Test
     fun `uiState should filter out unapproved accounts`() = runTest(testDispatcher) {
-        accounts.value = listOf(account(1, state = ACTIVE), account(2, state = OPENING), account(3, state = CLOSED))
+        repository.accounts.value = listOf(account(1, state = ACTIVE), account(2, state = OPENING), account(3, state = CLOSED))
         val viewModel = createViewModel()
 
         viewModel.uiState.test {
@@ -63,11 +48,11 @@ class AccountsListViewModelTest {
         }
     }
 
-    /** The flags: an action flips one flag and erases nothing. */
+    /** The flags: a failed refresh sets the error and erases nothing. */
     @Test
     fun `refresh failure should set the error and keep the list`() = runTest(testDispatcher) {
-        accounts.value = listOf(account(1, state = ACTIVE))
-        refresh.result = Result.failure(NoNetworkError())
+        repository.accounts.value = listOf(account(1, state = ACTIVE))
+        repository.refreshResult = Result.failure(NoNetworkError())
         val viewModel = createViewModel()
 
         viewModel.uiState.test {
@@ -92,17 +77,22 @@ class AccountsListViewModelTest {
     }
 
     /**
-     * The trap: a stateIn(WhileSubscribed) state stays at initialValue until collected.
-     * Without the collector below, `.value` is the initial loading state forever and the assertion
-     * would pass against it — for the wrong reason.
+     * The trap: a stateIn(WhileSubscribed) state stays at initialValue until collected. Without
+     * the collector below `.value` is the initial loading state forever, and an assertion against
+     * it would pass for the wrong reason. The loop is bounded: a loop that never becomes true
+     * never suspends, and runTest's timeout cannot end it.
      */
     @Test
     fun `reading value needs a collector`() = runTest(testDispatcher) {
-        accounts.value = listOf(account(1, state = ACTIVE))
+        repository.accounts.value = listOf(account(1, state = ACTIVE))
         val viewModel = createViewModel()
         backgroundScope.launch { viewModel.uiState.collect {} }
 
-        while (viewModel.uiState.value.totalAccounts == 0) runCurrent()
+        var spins = 0
+        while (viewModel.uiState.value.totalAccounts == 0) {
+            check(spins++ < 100) { "the derived state never received the accounts" }
+            runCurrent()
+        }
 
         assertEquals(1, viewModel.uiState.value.items.size)
     }
@@ -276,25 +266,30 @@ fun HomeForecastScreenshot() {
 
 ```kotlin
 /**
- * verify() walks only the application modules. Screen view models are registered INSIDE components
- * through rememberKoinModules, so their dependencies do not get here: a missing binding is found
- * not by a test but by a black screen in the browser. That happened with SeedUseCase — green tests,
- * and the app died on opening the main screen. Below, those view models are added by hand.
+ * The graph builds and every screen's view model resolves. View models are registered in the
+ * feature's UI module, so verify() sees them together with everything they inject.
  */
 class ClientKoinModuleTest {
     @OptIn(KoinExperimentalAPI::class)
     @Test
     fun checkKoinModule() {
-        module {
-            includes(appModules)
-            viewModelOf(::MainViewModel)
-            viewModelOf(::AuthViewModel)
-            viewModelOf(::WelcomeViewModel)
-        }.verify(
-            extraTypes = listOf(
-                HttpClientEngine::class,
-                HttpClientConfig::class,
-            ),
+        module { includes(appModules) }.verify(
+            extraTypes = listOf(HttpClientEngine::class, HttpClientConfig::class),   // supplied by the HttpClient builder, not the graph
         )
     }
+
+    /** verify() is static; this one creates. A defaulted or nullable constructor parameter only shows up here. */
+    @Test
+    fun viewModelsResolve() {
+        val koin = koinApplication { modules(appModules) }.koin
+        koin.get<AccountsListViewModel>()
+        koin.get<AccountDetailsViewModel> { parametersOf(AccountDetailsParams(accountId = 1L)) }
+    }
 }
+```
+
+If the project registers view models inside composables with `rememberKoinModules`, they never
+reach `appModules`, and the test above is blind to them: add `viewModelOf(::X)` for each such
+view model to the module under test by hand, and keep a comment saying why the list exists. A
+missing use-case binding once shipped that way: green tests, black screen on opening the main
+screen.

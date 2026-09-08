@@ -1,14 +1,14 @@
 ---
 name: kotlin-conventions
-description: "Naming, abstraction and commenting conventions for Kotlin Multiplatform code: how to name resources, routes, storage ports and their implementations, use cases, view models, states, components, DI modules, tests and expect/actual files; when an interface, a base class, a generic or an expect/actual pair is justified and when it is two implementations that will drift; Result at boundaries; events versus state; how to write a KDoc that names the failure it guards or the alternative that was rejected; what must not enter an open repository; and a grep-able review checklist. Use this whenever the user asks how to name something, asks for a code review or a style pass on Kotlin / KMP / Compose / Ktor code, refactors, introduces an abstraction, or asks whether something should be an interface, a base class or expect/actual."
+description: "Naming, abstraction and commenting conventions for Kotlin/KMP/Ktor/Compose code: names for resources, routes, ports and implementations, use cases, view models, states, events, tests; when an interface, base class, generic or expect/actual is justified; Result at boundaries; events versus state; KDoc that names the failure; what must not enter an open repository; a grep review checklist. Use for 'how should I name this', 'review this Kotlin code', 'should this be an interface / base class / expect'."
 ---
 
 # Kotlin conventions: names, abstractions, comments
 
-Extracted from [mani](https://github.com/youndie/mani-kotlin-fullstack), where one root package
-spans a contract module, two server builds and a four-platform client. The conventions are the
-ones that made that readable; each carries its reason so the next reader can tell a rule from a
-habit.
+The client and contract rows come from [mani](https://github.com/youndie/mani-kotlin-fullstack),
+where one root package spans a contract module, two server builds and a four-platform client;
+the server and larger-client rows from services with tenancy and roles, written generically. Each
+carries its reason so the next reader can tell a rule from a habit.
 
 ## Step 0. Check the project first
 
@@ -16,7 +16,7 @@ Read `.editorconfig`, `CLAUDE.md` and the newest feature in the module you are i
 project's conventions win.** Where the project has no convention for a case, use the one below
 and, if the repository keeps a conventions file, record it there in the same change.
 
-## Names by kind
+## Names by kind: contract and server
 
 | Kind | Name | Example | Why this shape |
 |---|---|---|---|
@@ -35,10 +35,15 @@ and, if the repository keeps a conventions file, record it there in the same cha
 | ports for cross-cutting effects | `fun interface <Noun>Reporter` / `<Noun>Notifier` with `Logging` / `Noop` companions | `ErrorReporter.Logging`, `ErrorReporter.Noop` | a dependency, substitutable; `expect` is not |
 | workers | `<Noun>Worker` / `<Noun>Scheduler` with `start()` / `stop()`, registered with an explicit lambda | `InventorySyncOutboxWorker` | intervals are defaulted parameters |
 | single-method port | `fun interface <Question>` | `StorageHealth { isReachable() }` | the only common thing between two drivers is the question |
-| routing | `fun Routing.<subject>Routing()` in `<Subject>Routing.kt` | `transactionRouting()` | one function per subject, assembled in one place |
+| routing | `fun Route.<subject>Routing()` in `<Subject>Routing.kt`, tier-agnostic | `ordersRouting()` | one function per subject; the application mounts it under a tier, possibly more than once |
 | validation | `fun <subject>Problem(x): String?` in `Rules.kt` | `transactionProblem`, `credentialsProblem` | returns the problem or null; no exception vocabulary |
-| service (server) | `<Subject>Service`, ordinary class in common | `AuthService`, `DemoService` | orchestration over ports |
-| Koin module | `val <feature>Module`, in `module.kt`; storage: `fun <technology>StorageModule(config)` | `authModule`, `mongoStorageModule` | the file name says "this feature's wiring" |
+| service (server) | `<Subject>Service`: a long-lived collaborator with state or configuration, not an operation | `TokenService`, `InventorySyncService` | an operation is a use case; a service is what several use cases share |
+| Koin module | `val <feature>Module`, in `<Name>Module.kt` or `module.kt`; storage: `fun <driver>StorageModule(config)` | `authModule`, `mongoStorageModule` | the file name says "this feature's wiring" |
+
+## Names by kind: client
+
+| Kind | Name | Example | Why this shape |
+|---|---|---|---|
 | client repository | interface `<Noun>Repository` in `domain`, `<Noun>RepositoryImpl` in `data`; methods `observe<Noun>s()` / `refresh<Noun>s()` | `AccountRepository`, `AccountRepositoryImpl` | one implementation on the client, so `Impl` is honest; the two verbs name the source of truth and the network |
 | domain model | the noun; ids as value classes; closed sets as sealed interfaces with `Other(raw)` | `Account`, `AccountId`, `AccountKind.Other("")` | typed, not stringly; an unknown server value survives the trip |
 | database row | `<Noun>Entity` + `<Noun>Dao` | `AccountEntity`, `AccountDao` | |
@@ -58,7 +63,7 @@ and, if the repository keeps a conventions file, record it there in the same cha
 | expect/actual file | `X.kt` + `X.<platform>.kt`, or the same file name in the platform source set | `ServerConfigPlatform.android.kt` | the IDE and `grep` pair them |
 | test class | `<Subject>Test`; paired tests across builds share the subject | `OwnershipTest` (JVM), `ManiApiTest` (native) | |
 | test function | an English sentence in backticks, no commas; camelCase when long | `` `a stranger cannot patch a foreign transaction through the id in the body` `` | see `kmp-testing` |
-| constants | `SCREAMING_CASE`, private unless shared | `MAX_COMMENT_LENGTH`, `TRANSACTION_COLLECTION` | a collection name shared by two builds is a constant in each with the same value |
+| constants | `SCREAMING_CASE`, private unless shared | `MAX_COMMENT_LENGTH`, `TRANSACTION_COLLECTION` | a collection name used by two builds is a constant in each (the builds share no code) and the raw-document test asserts they write the same collection |
 
 Two habits worth adopting whole: **the product's vocabulary in the UI, the model's in the
 code** (the interface says "rule", the class is `Transaction`), and **file names follow meaning,
@@ -67,11 +72,13 @@ extensions), with the ktlint filename rule disabled and the reason recorded in `
 
 ## Packages
 
-- One root package for every module (`io.github.youndie.mani`). A feature then has the same
-  directory in every module it touches, and one `grep` finds all sides.
+- One root package for every module (`com.example.product`, not `…product.server` and
+  `…product.client`). A feature then has the same directory in every module it touches, and one
+  `grep` finds all sides.
 - Feature first, layer second: `feature/<name>/{data,domain,ui}`, not `data/<name>`.
 - The root holds only what several features import and none owns: `security/`, `config/`,
-  `navigation/`, `theme/`, `components/`, `useCase/`, `uiState/`, `utilz/`.
+  `navigation/`, `theme/`, `components/`, `core/` (the use-case base types, the error
+  hierarchy, `UiText`).
 - Vendored third-party code keeps its own package and is excluded from formatting by path, with
   the reason next to the exclusion.
 
@@ -85,8 +92,9 @@ follow Conventional Commits. The check that catches drift:
 grep -rnP '[\x{0400}-\x{04FF}]' --include='*.kt' --include='*.kts' --include='*.toml' .
 ```
 
-Test fixtures may legitimately contain non-ASCII (an octets-versus-characters check); the grep
-is a review aid, not a gate on its own.
+The grep is written for a Cyrillic-speaking team; swap the range for your script. Test fixtures
+may legitimately contain non-ASCII (an octets-versus-characters check); the grep is a review
+aid, not a gate on its own.
 
 ## Abstractions: when each one is earned
 
@@ -140,15 +148,17 @@ gets "cleaned up".
 exception hierarchy to maintain, trivially testable at each boundary, and the returned text is
 what the user sees, so it says what to fix.
 
-**Configuration is a data class built by one `fromEnv()`**, nested per concern, so a test
-constructs it in code. A decision about a value is a named function of that value.
+**Configuration is typed and built in one place**: nested data classes per concern, read from
+typed HOCON properties on a JVM-only service or from an `EnvSource` on a multiplatform one, so a
+test constructs it in code. A required secret has no default; a decision about a value is a named
+function of that value.
 
 ## `Result`, exceptions and cancellation
 
-- `Result` at the **use-case boundary** on the client, for **actions** only: the view model folds
-  it into flags. An **observation** is a plain `Flow`; a `Flow<Result<T>>` hides failures inside
-  the stream and forces every collector to unwrap. On the server, routes call repositories and
-  services directly and let `StatusPages` map exceptions; a small server has no use-case layer.
+- `Result` at the **use-case boundary**, on both sides, for **actions** only: the client's view
+  model folds it into flags, the server's route dispatches it. An **observation** is a plain
+  `Flow`; a `Flow<Result<T>>` hides failures inside the stream and forces every collector to
+  unwrap. A plain read with no rule may skip the use case and call the repository.
 - Transport exceptions become a domain `AppError` **once**, at the repository; nothing above the
   data layer imports the HTTP client. The UI maps `AppError` to `UiText`; `throwable.message` is
   a library's English or null.
@@ -182,8 +192,9 @@ in more than one place is the sign that two writers will race and one will erase
 
 ## Immutability and concurrency
 
-- `ImmutableList` / `ImmutableMap` / `ImmutableSet` in every UiState: Compose skips recomposition
-  only for stable types.
+- `ImmutableList` / `ImmutableMap` / `ImmutableSet` in every UiState: value equality and a
+  documented no-mutation contract. With strong skipping (default since Kotlin 2.0.20) a `List`
+  no longer blocks skipping, so this is a consistency preference, not a correctness rule.
 - Flows that several coroutines write change through `MutableStateFlow.update { }`; `value += x`
   is three steps and loses concurrent writes. Better still, do not have several writers: derive.
 - A resource with a pool (a database client) is one `single` per process; the comment says why.
@@ -246,7 +257,7 @@ above. Then read for:
 - [ ] `runCatching` in suspend code; `catch (e: Exception)` without a cancellation rethrow above
 - [ ] a default parameter on a constructor registered with `singleOf` / `factoryOf`
 - [ ] a generic bound to DI without a name
-- [ ] `value +=` on a shared flow; a `List` in a UiState
+- [ ] `value +=` on a shared flow; a mutable collection type in a UiState
 - [ ] a KDoc that restates the name; a `@Suppress` without a reason
 - [ ] a comma in a backticked test name; non-English text in code
 - [ ] anything that describes your machine rather than the product

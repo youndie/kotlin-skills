@@ -64,12 +64,12 @@ object BigDecimalSerializer : KSerializer<BigDecimal> {
 ## `:server-common` — the route parses the path
 
 ```kotlin
-fun Routing.transactionRouting() {
+// Mounted by the application under authenticate(); the function itself names no tier.
+fun Route.transactionRouting() {
     val transactionRepository by inject<TransactionRepository>()
     val categoryRepository by inject<CategoryRepository>()
-    val jwtConfig by inject<JWTConfig>()
 
-    authenticate(jwtConfig.name) {
+    run {
         post<TransactionResource> {
             val transaction = call.receive<Transaction>()
 
@@ -82,10 +82,8 @@ fun Routing.transactionRouting() {
             val userId = call.currentUserId()
             val categories = categoryRepository.getByUser(userId)
             val id = transactionRepository.create(transaction, userId)
-            val added = transactionRepository.getById(id) ?: run {
-                call.respond(HttpStatusCode.NotFound)
-                return@post
-            }
+            // Not readable by its own id after insert: a storage failure → StatusPages → 500.
+            val added = transactionRepository.getById(id) ?: error("transaction $id vanished after insert")
 
             call.respond(HttpStatusCode.Created, added.toTransaction(categories))
         }
@@ -122,7 +120,7 @@ fun Routing.transactionRouting() {
 
 ```kotlin
 /** The only class on the client that knows the HTTP client for this resource. */
-class RulesApi(private val httpClient: HttpClient) {
+class TransactionApi(private val httpClient: HttpClient) {
 
     suspend fun list(): List<Transaction> =
         httpClient.get(TransactionResource()).body()

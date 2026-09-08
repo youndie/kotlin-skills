@@ -1,7 +1,10 @@
 # Application assembly, tiers at the mount, the access helper, role gates
 
-The first half is the public reference project (a two-build server, comments translated). The
-second half is the multi-tenant shape of larger services, written generically.
+The first half is the public reference project (a two-build server, comments translated), with
+one edit: its routing functions take a `Route` receiver and `authenticate` is applied at the
+mount, as the skill prescribes; the reference itself still opens `authenticate` inside each
+routing function. The second half is the multi-tenant shape of larger services, written
+generically.
 
 ## The shared assembly (`server-common`)
 
@@ -65,14 +68,18 @@ fun Application.configureManiAuth(config: ManiConfig, tokenService: TokenService
 }
 
 /** API routes. Static files are served differently by each build and wired by each build. */
-fun Routing.maniApiRouting() {
+fun Route.maniApiRouting(jwtName: String) {
+    // Open: sign-up, sign-in, refresh, the sandbox entry, health.
     authRouting()
-    categoryRouting()
     demoRouting()
     healthRouting()
     currencyRouting()
-    transactionRouting()
     userRouting()
+    // Bearer access token: everything that belongs to a user. The tier is applied HERE, once.
+    authenticate(jwtName) {
+        categoryRouting()
+        transactionRouting()
+    }
 }
 ```
 
@@ -90,7 +97,7 @@ fun Application.module() {
         modules(coreModule(config), mongoStorageModule(config.mongo))
     }
     configureManiAuth(config, get<TokenService>())
-    configureRouting()
+    routing { maniApiRouting(config.jwt.name) }
 }
 ```
 
@@ -117,7 +124,7 @@ fun Application.maniModule(config: ManiConfig) {
     // without a frontend — convenient for tests and local runs.
     val assets = config.webRoot?.let(WebAssets::scan)
     routing {
-        maniApiRouting()
+        maniApiRouting(config.jwt.name)
         if (assets != null) webRoutes(assets)
     }
 }
@@ -146,12 +153,12 @@ fun ApplicationCall.currentUserId(): String = principal<ManiPrincipal>()?.id
 ## The complete transaction routing
 
 ```kotlin
-fun Routing.transactionRouting() {
+fun Route.transactionRouting() {
     val transactionRepository by inject<TransactionRepository>()
     val categoryRepository by inject<CategoryRepository>()
-    val jwtConfig by inject<JWTConfig>()
 
-    authenticate(jwtConfig.name) {
+    // Mounted under authenticate() by maniApiRouting; nothing about the tier here.
+    run {
         post<TransactionResource> {
             val transaction = call.receive<Transaction>()
 
@@ -169,11 +176,9 @@ fun Routing.transactionRouting() {
             val categories = categoryRepository.getByUser(userId)
 
             val id = transactionRepository.create(transaction, userId)
-            val added = transactionRepository.getById(id)
-            if (added == null) {
-                call.respond(HttpStatusCode.NotFound)
-                return@post
-            }
+            // Created and not readable by its own id is a storage failure, not a client error:
+            // an exception here reaches StatusPages, which reports it and answers 500.
+            val added = transactionRepository.getById(id) ?: error("transaction $id vanished after insert")
 
             call.respond(HttpStatusCode.Created, added.toTransaction(categories))
         }
@@ -224,7 +229,7 @@ expect fun serverBuildKind(): String
 
 private val startedAt = Clock.System.now()
 
-fun Routing.healthRouting() {
+fun Route.healthRouting() {
     val storageHealth by inject<StorageHealth>()
 
     // Readiness: one request into the database per probe. A driver failure is "not ready", not 500:
@@ -314,9 +319,8 @@ suspend fun RoutingContext.currentUser(): User? {
 suspend inline fun RoutingContext.withAccess(min: Role = Role.VIEWER, crossinline block: suspend (Access) -> Unit) {
     val workspaceId = call.request.header("X-Workspace-Id") ?: throw BadRequestException("Missing X-Workspace-Id")
     val user = currentUser()
-    val granted = user?.roles?.any { it.workspaceId == workspaceId && it.role.permits(min) } == true
 
-    if (!granted) {
+    if (user == null || user.roles.none { it.workspaceId == workspaceId && it.role.permits(min) }) {
         // Name the route and the required role; never the token. A bare 403 read as "the
         // workspace was not created", and which role was missing nobody said.
         accessLog.warn("no access: ${call.request.httpMethod.value} ${call.request.path()}, needs $min in $workspaceId")
@@ -325,7 +329,16 @@ suspend inline fun RoutingContext.withAccess(min: Role = Role.VIEWER, crossinlin
     }
     block(Access(user, workspaceId))
 }
+
+private val accessLog = KtorSimpleLogger("orders.access")
+
+// User and its roles, as the helper needs them
+data class WorkspaceRole(val workspaceId: String, val role: Role)
+data class User(val id: String, val roles: List<WorkspaceRole>)
 ```
+
+The `when` guards in `currentUser()` (`"orders-bot" if … ->`) need Kotlin 2.2+; on older
+compilers write nested `if`s.
 
 ## A role gate as a route-scoped plugin
 
@@ -367,6 +380,18 @@ fun Route.withAnyRole(vararg roles: String, build: Route.() -> Unit) = roleScope
 ## StatusPages with a reporter, and a CORS refusal that is no longer silent
 
 ```kotlin
+/**
+ * Ktor's own client-side exceptions keep their status. Shared by every service in a core
+ * library; a `when` copied per service drifted (one knew BadRequestException, one did not).
+ */
+fun Throwable.clientErrorStatus(): HttpStatusCode? = when (this) {
+    is BadRequestException -> HttpStatusCode.BadRequest
+    is NotFoundException -> HttpStatusCode.NotFound
+    is UnsupportedMediaTypeException -> HttpStatusCode.UnsupportedMediaType
+    is PayloadTooLargeException -> HttpStatusCode.PayloadTooLarge
+    else -> null
+}
+
 fun Application.configureStatusPages(reporter: ErrorReporter) {
     install(StatusPages) {
         exception<Throwable> { call, cause ->
@@ -407,6 +432,9 @@ val CorsRejectionLog = createApplicationPlugin("CorsRejectionLog") {
         }
     }
 }
+
+private val corsLog = KtorSimpleLogger("orders.cors")
+private val log = KtorSimpleLogger("orders")
 
 /** Where faults go. A fun interface bound in DI: substitutable in tests, disabled in utilities — expect/actual could not be. */
 fun interface ErrorReporter {

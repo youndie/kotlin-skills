@@ -180,3 +180,21 @@ The list of what drifted when the two entry points each had their own copy: CORS
 build (the browser's request never arrived, no log, no report), `explicitNulls` different (a
 different response format for the generated client), `StatusPages` collapsing everything into
 `500`. None of the three fails a build or a test; they are noticed after switching the image.
+
+
+## What Kotlin/Native takes away, and what replaces it
+
+| Not in `commonMain` | Use instead |
+|---|---|
+| `java.*`, `System.getenv`, HOCON | `kotlinx-io`, `kotlinx-datetime`, `expect readEnv`, ENV config |
+| `ktor-server-auth-jwt`, JVM role-gate plugins | your own provider over a shared token verifier; a route-scoped role plugin over the multiplatform principal |
+| `CallLogging`, slf4j, JVM-only reporters | a small call-logging plugin; an `ErrorReporter` port |
+| `ktor-server-compression`, `staticResources` | pre-compressed files served from a directory scanned once |
+| mocking libraries in shared tests | hand-written fakes |
+
+Available on native: `ktor-server-test-host`, `ktor-client-mock`, Koin (`koin-ktor` publishes for
+`linuxX64`), `kotlinx-coroutines-test`, sqlx4k for SQL, a Mongo binding over the C driver. The
+release test run is mandatory: Kotlin/Native omits type-cast checks in release builds, and code
+that fails with a catchable exception in debug reaches undefined behaviour in the binary that
+ships. A vanished database can make a native query hang rather than fail: liveness never touches
+storage, readiness does.

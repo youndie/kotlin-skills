@@ -4,8 +4,9 @@ Each command finds one class of violation from `kotlin-conventions`. Run from th
 root; adjust module names to the project. A hit is a reason to look, not automatically a defect.
 
 ```bash
-# String API paths outside the contract module (rule: the path exists once)
-grep -rn --include='*.kt' -E '"/(api|transactions|categories|auth|users)[/"]' . | grep -v '/shared/src/'
+# Routes registered by a string path on the server, requests built from a string on the client (rule: the path exists once)
+grep -rnE --include='*.kt' '\b(get|post|put|patch|delete|route)\("/' server*/src
+grep -rnE --include='*.kt' '\.(get|post|put|patch|delete)\("' client*/src composeApp/src
 ```
 
 ```bash
@@ -42,6 +43,7 @@ grep -rn --include='*.kt' -E 'single<[A-Za-z]+<[A-Za-z]+>>\s*\{' .
 
 ```bash
 # Constructors with default parameters registered via singleOf/factoryOf/viewModelOf
+# (matches single-line constructors only; for multi-line ones read the class, the graph test is the real guard)
 grep -rhn --include='*.kt' -oE '(singleOf|factoryOf|viewModelOf)\(::[A-Za-z]+' . | sed 's/.*::/::/' | sort -u | while read -r ref; do
   cls=${ref#::}
   grep -rn --include='*.kt' -E "class $cls\(" . | grep -E '= [^,)]+[,)]' && echo "  ^ $cls has a default parameter and is registered reflectively"
@@ -54,7 +56,7 @@ grep -rn --include='*.kt' -E '\.value (\+|-)= ' .
 ```
 
 ```bash
-# Mutable collections in UiState classes (rule: immutable collections for Compose stability)
+# Mutable collection types in UiState classes (rule: immutable collections in states, a consistency preference)
 grep -rn --include='*UiState.kt' -E 'val [a-zA-Z]+: (List|Map|Set)<' .
 ```
 

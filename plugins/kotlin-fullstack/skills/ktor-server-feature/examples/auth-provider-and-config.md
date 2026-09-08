@@ -89,7 +89,7 @@ without it a refresh token is accepted everywhere an access token is expected an
 lifetime means nothing; and a random `jti`, because `exp` is stored in seconds and two tokens
 issued in the same second would otherwise be byte-identical, making rotation illusory.
 
-## Configuration
+## Configuration (the public reference: a demo whose `docker compose up` must work)
 
 ```kotlin
 /**
@@ -171,7 +171,7 @@ actual fun readEnv(name: String): String? = getenv(name)?.toKString()
 ```
 
 
-## Configuration, the other two shapes
+## Configuration, the other two shapes (services: a required secret refuses to start)
 
 ### Typed HOCON properties on a JVM-only service
 

@@ -1,6 +1,6 @@
 ---
 name: compose-client-feature
-description: "Implement or change a screen or feature in a Compose Multiplatform client (Android, iOS, desktop, browser from one source set): the domain / data / ui split, repositories with observe-and-refresh over a local source of truth, use cases (Result for actions, Flow for observation), view models whose UiState is derived with combine and stateIn from domain flows plus UiFlags, UiAction in and UiEvent out, the Screen / Content split, UI mappers, error types, navigation with a graph built once, session handling, and Koin wiring with its traps. Use this whenever the user says add a screen, add a settings page, implement a client feature, create a view model, show data from the API, handle logout or session expiry, add navigation, or touches client / composeApp / feature-*-ui code — including desktop and web dashboards, not only mobile apps."
+description: "Add or change a screen or feature in a Compose Multiplatform client (Android, iOS, desktop, web): domain/data/ui split, observe-and-refresh repositories, use cases, a view model whose UiState is derived with combine and stateIn plus UiFlags, UiAction in and UiEvent out, Screen/Content split, navigation, session, Koin. Use for 'add a screen', 'add a settings page', 'create a view model', 'show data from the API', 'handle logout', 'add navigation' in Compose code, dashboards included."
 ---
 
 # A feature in a Compose Multiplatform client
@@ -15,15 +15,15 @@ screens are the counter-example where noted.
 ## Step 0. Check the project first
 
 1. Find the feature **closest to your task** and copy its layout. Projects rarely agree with
-   themselves: newer screens follow the shape below, older ones set `state.value` by hand. Copy
-   the newer one; do not retrofit the older one in passing. **The project's conventions win.**
+   themselves; where an older screen sets `state.value` by hand and a newer one derives it, copy
+   the newer one and do not retrofit the older in passing. **The project's conventions win.**
 2. Identify: how features are cut (packages in one module, or `feature-x-domain / -data / -ui`
    Gradle modules), DI (Koin here), navigation (androidx.navigation here; Navigation 3, Voyager,
    Decompose differ in details, not in the layering), whether there is a local database, whether
    there is a base `UseCase` module, an `AppError` hierarchy, a `UiText` type.
 3. Read `CLAUDE.md` / `README.md`. When they and existing code disagree, new code follows
    `CLAUDE.md`.
-4. Look for a documentation gate (`docs/screens/`, a coverage map checked in CI): the new
+4. If the repository keeps screen documentation with a coverage map checked in CI, the new
    screen's document is part of the same change, and any sentence claiming the feature does not
    exist must go.
 
@@ -100,12 +100,9 @@ whether it does I/O.
 `suspendRunCatching` rethrows `CancellationException`; plain `runCatching` in suspend code turns a
 cancelled coroutine into an error on screen.
 
-What **not** to build: a generic `UseCase<P,T>` base with `get()` that rethrows and `getOrNull()`
-(the caller then bypasses `Result` and the error path is untested); a `FlowUseCase` that hardcodes
-`Dispatchers.IO` and wraps every emission in `Result` (untestable threading, errors hidden at the
-interface); a `DataSource<T : WithId>` plus `BaseFlowRepository<T>` CRUD generic (a marker
-interface on the model, erased generics that force named DI bindings, and every feature bent to
-the shape of a list).
+Use cases are final classes; **the test seam is the repository interface**, and a view-model
+test builds the real use cases over fake repositories (`kmp-testing`). What not to build, and
+why, is in [examples/feature-skeleton.md](examples/feature-skeleton.md), "What was replaced".
 
 ## Data
 
@@ -116,7 +113,7 @@ class AccountRepositoryImpl(private val api: AccountApi, private val dao: Accoun
     override fun observeAccounts(clientId: Long): Flow<List<Account>> =
         dao.observeAccounts(clientId).map { entities -> entities.map { it.toDomain() } }
 
-    override suspend fun refreshAccounts(clientId: Long) = runNetworkCatching {
+    override suspend fun refreshAccounts(clientId: Long): Unit = runNetworkCatching {   // `: Unit`, or the DAO's return type leaks into the override
         val response = api.getAccounts(GetAccountsRequest(clientId))
         dao.upsertAll(response.accounts.map { it.toEntity(clientId) })
     }
@@ -134,8 +131,7 @@ Mappers are extension functions next to the repository: `Dto.toEntity()`, `Entit
 `Dto.toDomain()` when there is no database. Each is a pure function and gets a test.
 
 Optimistic writes (put the change into the source of truth before the call, roll back on
-failure) remain a technique for lists the user edits in place; they belong inside one
-repository, not in a base class every repository inherits.
+failure) are a technique for lists the user edits in place; they live inside one repository.
 
 ## UI: the view model derives, it does not mutate
 
@@ -161,8 +157,11 @@ class AccountsListViewModel(
         val amountsHidden: Boolean = false,
     )
 
+    /** A failing source is reported into the flags and completes; combine keeps its last value. A catch after stateIn would be too late: the exception has already cancelled viewModelScope. */
+    private fun <T> Flow<T>.reported(): Flow<T> = catch { e -> uiFlags.update { it.copy(errorMessage = mapper.toMessage(e)) } }
+
     val uiState: StateFlow<AccountsListUiState> =
-        combine(observeAccountsUseCase(Unit), observeCurrenciesUseCase(Unit), filter, uiFlags) { accounts, currencies, filter, flags ->
+        combine(observeAccountsUseCase(Unit).reported(), observeCurrenciesUseCase(Unit).reported(), filter, uiFlags) { accounts, currencies, filter, flags ->
             val visible = accounts.filter(filter::matches)
             AccountsListUiState(
                 items = visible.map(mapper::toListItem).toImmutableList(),
@@ -178,6 +177,8 @@ class AccountsListViewModel(
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), AccountsListUiState(loading = true))
 
     init {
+        // The first load happens because `filter` is a StateFlow and emits its current value on
+        // collection; do not also send to refreshTrigger here, or the screen loads twice.
         viewModelScope.launch {
             merge(refreshTrigger.receiveAsFlow(), filter).collectLatest { load() }
         }
@@ -215,32 +216,46 @@ The pieces, and why each is where it is:
 - **`UiFlags` holds the screen's own booleans**: loading, error, which sheet or dialog is open.
   A small data class updated atomically with `uiFlags.update { it.copy(...) }`, separate from the
   data so that showing a sheet does not touch the list and loading does not erase what was
-  loaded. Flatten it into `UiState` for a simple screen; keep it nested as `state.flags` when a
-  screen has many sheets. Fetched data that is not a domain flow (a summary computed per
-  selection) lives in its own `MutableStateFlow<FetchedData>` and joins the `combine` too.
+  loaded. Nested in the view model and flattened into `UiState` for a simple screen; a top-level
+  `<Screen>UiFlags` kept as `state.flags` when a screen has many sheets. Fetched data that is
+  not a domain flow (a summary computed per selection) lives in its own
+  `MutableStateFlow<FetchedData>` and joins the `combine` too. The typed `combine` overloads
+  stop at five flows; past that, nest a `combine` or group inputs into a data class.
+- **A failing source flow is caught per source, before `combine`** (`.reported()` above): it
+  writes the error into the flags and completes, and `combine` keeps its last value. There is
+  no recovery after `stateIn`: an uncaught exception there cancels `viewModelScope`.
 - **`UiAction` is the only way in**: a sealed interface, one `onAction`. Handlers are named after
   what the person did (`AccountClick`, `FiltersSheetDismiss`), not after what the code does.
 - **`UiEvent` is the only way out** for one-shot effects: navigation, a toast, a share sheet. A
-  `Channel(UNLIMITED)` exposed as `receiveAsFlow()`; the Screen collects it in
-  `LaunchedEffect(Unit)` and calls its navigation callbacks. Never a `success: Boolean` in the
-  state that a `LaunchedEffect` watches (it fires again on every recomposition after the flag is
-  set, and clearing it is one more action), never a `loggedOut` `StateFlow<Boolean>`, never a
+  `Channel(UNLIMITED)` exposed as `receiveAsFlow()` rather than a `SharedFlow(replay = 0)`: an
+  event sent while no Screen is collecting (a navigation transition, a rotation) is buffered
+  and delivered once, where a replay-less flow drops it. The Screen collects it in
+  `LaunchedEffect(Unit)`; on Android, collect through `repeatOnLifecycle(STARTED)` if the
+  callbacks navigate, so a stopped screen does not. Never a `success: Boolean` in the state that
+  a `LaunchedEffect` watches (it fires again after every recomposition until cleared, and
+  clearing it is one more action), never a `loggedOut` `StateFlow<Boolean>`, never a
   subscription of the navigation graph to a token.
 - **Reloads are `collectLatest` over a trigger**: `merge(refreshTrigger, filter)` so a new
   filter cancels the in-flight load and starts the right one; no `loadJob?.cancel()` bookkeeping.
   When a load depends on several inputs (selected account × timeframe), `combine` them,
   `distinctUntilChanged`, then `collectLatest`.
 - **`stateIn(WhileSubscribed(5_000))`** stops the upstream when nobody looks for five seconds
-  and restarts it on return, which is what a screen behind another screen wants. It also means
-  `uiState.value` in a test stays at `initialValue` until something collects; see `kmp-testing`.
+  and restarts it on return: a screen behind another screen stops working, and an Android
+  configuration change (shorter than the grace) does not restart the upstream. The subscriber
+  has to actually leave, which is why the Screen uses `collectAsStateWithLifecycle`, not
+  `collectAsState`. Inputs that must survive process death (a filter, a selected id) come from
+  `SavedStateHandle`. In a test `uiState.value` stays at `initialValue` until something
+  collects; see `kmp-testing`.
 - **A `UiMapper` object** turns domain into UI items: formatting, icons, `UiText` (a resource id
   or a literal, resolved in Compose). It is a pure function with a test; the view model does not
   format, the Content does not compute.
 - **Errors reach the UI as `UiText`, mapped from `AppError`** by the mapper, not as
   `throwable.message` (which is English from a library, or null).
 
-Immutable collections (`ImmutableList`) in `UiState` keep it stable for Compose; a `List` field
-makes the compiler assume the whole state may change.
+Immutable collections (`ImmutableList`) in `UiState`: with strong skipping (the default since
+Kotlin 2.0.20) a `List` field no longer prevents skipping, but the state then compares by
+instance; an `ImmutableList` gives value equality and documents that nothing mutates it. A
+preference worth keeping consistently, not a correctness rule.
 
 ## Screen and Content
 
@@ -294,13 +309,15 @@ built from a small fixture object; they double as the fixtures for Content tests
   Sign-in and sign-out are explicit transitions triggered by events from the screens.
 - **Session expiry is an event** (`Flow<Unit>`, `replay = 0`) collected by the nav host; with
   replay every new subscriber would be thrown to the welcome screen.
-- Routes with arguments are `@Serializable` classes: no reflection outside the JVM. Adding a
-  plain screen touches the screen enum, its title, the root-screens set (back arrow or not), the
-  nav-host entry, the caller's callback, and the back-arrow test.
-- **Returning a result to a previous screen** goes through a result store keyed by a string
-  (set on the way back, observed and consumed once by the caller), not through a shared view
-  model or a global flag.
-- In the browser, bind the controller to history so back / forward and the address bar are real.
+- Routes with arguments are `@Serializable` classes (typed, `toRoute<T>()` on the entry or on
+  the `SavedStateHandle`); plain screens may stay an enum of names in a project that already has
+  one. Adding a screen touches the destination, the nav-host entry and the caller's callback,
+  plus whatever the project derives from the route (an app-bar title, a "root screen" set).
+- **Returning a result to a previous screen** goes through
+  `previousBackStackEntry?.savedStateHandle` or a small result store keyed by a string (set on
+  the way back, observed and consumed once), not through a shared view model or a global flag.
+- In the browser, bind the controller to history (`window.bindToNavigation(navController)` from
+  `navigation-compose`) so back / forward and the address bar are real.
 
 Details and the defects behind each rule: [examples/navigation.md](examples/navigation.md).
 
@@ -319,20 +336,37 @@ default for every feature. [examples/network-and-session.md](examples/network-an
 - `viewModelOf(::X)`, `singleOf(::X)`, `factoryOf(::X)` resolve **every** constructor parameter,
   defaults included; a constructor with a default parameter gets an explicit lambda, and a
   binding that exists only to satisfy someone else's default (`single { Dispatchers.Default }`)
-  is a smell.
-- Screen view models are `viewModel { }` definitions in the feature's UI module, listed in the
-  graph test. Registering a view model inside a composable with `rememberKoinModules` hides it
-  from the graph test; if the project does that, add those view models to the test by hand.
+  is a smell. A view model that needs a dispatcher for heavy mapping takes it as a constructor
+  parameter **without a default** and the module binds one; tests pass the test dispatcher.
+- Screen view models are registered in the feature's UI module (`viewModelOf(::X)` when every
+  parameter is injectable, `viewModel { }` with route parameters), so the graph test sees them.
+  Registering a view model inside a composable with `rememberKoinModules` hides it from the
+  graph test; if the project already does that, add those view models to the test by hand.
 - A use case shared by two screens is registered in its domain module, not in one screen's.
 - A view model with route parameters takes them as a `Params` data class through
-  `parametersOf`, not as loose primitives.
+  `parametersOf`, not as loose primitives:
+
+  ```kotlin
+  class AccountDetailsParams(val accountId: Long)
+  val accountsUiModule = module { viewModel { (params: AccountDetailsParams) -> AccountDetailsViewModel(params, get(), get()) } }
+
+  // the nav-host entry hands the typed route to the Screen; the Screen builds Params
+  composable<AccountRoute> { entry -> AccountDetailsScreen(AccountDetailsParams(entry.toRoute<AccountRoute>().id), onBack = { navController.popBackStack() }) }
+
+  @Composable
+  fun AccountDetailsScreen(params: AccountDetailsParams, onBack: () -> Unit,
+      viewModel: AccountDetailsViewModel = koinViewModel(parameters = { parametersOf(params) })) { /* … */ }
+  ```
+
+  The alternative is `SavedStateHandle.toRoute<AccountRoute>()` inside the view model, with
+  `viewModelOf(::X)` resolving the handle; a test then constructs the view model with
+  `SavedStateHandle(mapOf(...))` or, simpler, with the `Params` directly.
 
 ## Compose pitfalls already paid for
 
 - `Modifier.padding(16.dp).verticalScroll(state)` clips at the padding edge; order it
   `verticalScroll(state).padding(...)`, or take `contentPadding` from the shell.
 - One scroll per screen; a `LazyColumn` inside `verticalScroll` fails on infinite height.
-- `remember { @Composable { ... } }` hides composition boundaries; use a named composable.
 - Wide layouts branch inside the Content on `BoxWithConstraints`, so one screenshot set covers
   both.
 
@@ -347,7 +381,11 @@ default for every feature. [examples/network-and-session.md](examples/network-an
 - [ ] Screen / Content split with sheets and dialogs inside Content; previews for every state
 - [ ] navigation entry, title, root set, callbacks; graph built once
 - [ ] Koin: no default parameters under `*Of`, view models in the graph test, shared use cases in the domain module
-- [ ] tests: mapper, view model (collecting the `stateIn` flow), Content with an `onAction` recorder, screenshots (see `kmp-testing`)
+- [ ] tests: mapper, view model over fake repositories (collecting the `stateIn` flow), Content with an `onAction` recorder, screenshots (see `kmp-testing`)
+
+Dependencies the snippets assume: `koin-compose-viewmodel` (`koinViewModel`, `viewModelOf`),
+`lifecycle-runtime-compose` (`collectAsStateWithLifecycle`), `navigation-compose`,
+`kotlinx-collections-immutable`, `kotlinx-coroutines-core`.
 
 Examples: [examples/feature-skeleton.md](examples/feature-skeleton.md) (domain, data, view
 model, state, screen, mapper), [examples/navigation.md](examples/navigation.md),

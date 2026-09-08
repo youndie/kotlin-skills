@@ -25,11 +25,13 @@ class TransactionRoute(val id: String)
 /**
  * A NavHost whose graph is assembled once.
  *
- * The ordinary NavHost rebuilds the graph when the builder lambda changes, and installing a new
- * graph resets navigation to the start destination. The lambda captures everything it sees, so it
- * becomes new on any recomposition of the parent — for example when the app bar changes its title.
- * In the app this looked like: sign-in went to the main screen, and the very next recomposition
- * returned to the welcome screen. Screens inside recompose as usual: the graph is frozen, not their content.
+ * The ordinary NavHost rebuilds the graph when the builder lambda changes, and the lambda captures
+ * everything it sees, so it becomes new on any recomposition of the parent — for example when the
+ * app bar changes its title. A rebuilt graph that differs from the installed one (here it did:
+ * navigateAndClean below re-points the start destination, and the rebuilt graph carried the
+ * original) replaces the back stack. In the app this looked like: sign-in went to the main screen,
+ * and the very next recomposition returned to the welcome screen. Screens inside recompose as
+ * usual: the graph is frozen, not their content.
  */
 @Composable
 fun StableNavHost(
@@ -42,6 +44,7 @@ fun StableNavHost(
     NavHost(navController = navController, graph = graph, modifier = modifier)
 }
 
+/** String routes only: after setStartDestination with a typed route, startDestinationRoute is null. */
 fun NavController.navigateAndClean(route: String) {
     navigate(route = route) { popUpTo(graph.startDestinationRoute!!) { inclusive = true } }
     graph.setStartDestination(route)

@@ -70,11 +70,11 @@ kotlin {
             // of the public contract. Consumers would otherwise declare the same dependency
             // themselves and drift apart on versions.
             api(libs.bignum)
-            api(libs.ktor.client.resources)
+            api(libs.ktor.resources)      // io.ktor:ktor-resources, not ktor-client-resources: the server builds must not inherit a client
             api(libs.kotlinx.datetime)
             api(libs.kotlinx.serialization.json)
         }
-        commonTest.dependencies { api(libs.kotlin.test) }
+        commonTest.dependencies { implementation(libs.kotlin.test) }
     }
 }
 ```
@@ -393,3 +393,22 @@ class ModuleUiPlugin : Plugin<Project> {
 The application module depends on every `*-ui` and `*-data` module, declares the Koin modules
 of each, and hosts navigation. `core:*` modules are one per concern (`usecase`, `network`,
 `database`, `uikit`, `di`) and never depend on a feature.
+
+## A library-style server
+
+A server that ships as a library cuts by the same rule, "a module per thing that can vary":
+
+| Module | What it is |
+|---|---|
+| `:core` | domain: models, the storage **ports** (`port/`), `TransactionManager`, use cases by feature, the DI modules that bind them; no driver, no HTTP |
+| `:crypto`, `:shared-*` | pure libraries the core depends on, and the contracts consumers import |
+| `:storage-<driver>-core`, `:storage-<driver>-<db>` | the repositories written against one driver, and one thin module per database bringing its driver and its schema; a native binary cannot link two drivers |
+| `:server` | the Ktor surface: routes, plugins, the two engines; it knows `:core` and nothing about drivers |
+| `:server-boot` | the composition root function (`runService(storage = …, authMethods = …)`) and the environment reading |
+| `:auth-<method>` | optional capabilities as modules: present on the classpath means available, absent means impossible |
+| `:distribution-*` | one `Main.kt` and one dependency list each; the dependency list **is** the feature set |
+| `:cli`, `:client` | consumers of the shared contracts, built in the same repository so they cannot drift |
+
+The property this buys: a capability that is not in the distribution's dependency list cannot be
+switched on by any configuration, because the code is not in the binary.
+
