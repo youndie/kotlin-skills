@@ -252,6 +252,10 @@ report a task up to date while the XML is from the previous run.
   plugins, mocking libraries) and what replaces it; the **release test run is mandatory** because
   the release binary omits type-cast checks; liveness never touches storage because a vanished
   database can hang a native query. Table in [examples/composition-and-distributions.md](examples/composition-and-distributions.md).
+- **The engine the build runs on** (CIO, Netty, Jetty): a project-layout decision, not a feature
+  one, and a measured one — handing a request to a handler is a third to a half of a CIO service's
+  CPU against one to two per cent of a Netty one, and the right answer flips when handlers block.
+  `kmp-project-structure`, "The server engine is a per-build decision".
 - **A library-style server** (several distributions, two engines): a composition-root function
   with lambdas, an isolated `koinApplication` instead of the global `startKoin`, dependencies
   handed to routes explicitly. Same file.

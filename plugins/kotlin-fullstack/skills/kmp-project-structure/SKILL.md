@@ -1,6 +1,6 @@
 ---
 name: kmp-project-structure
-description: "Lay out or restructure a Kotlin Multiplatform project: Gradle modules (shared contract, Compose client, server-common plus one module per server build), targets, commonMain versus platform source sets, feature packages, the library-scale module cut. Use for 'set up the KMP project', 'add a module or target', 'where does this class go', 'split the module' in Kotlin/Gradle code."
+description: "Lay out or restructure a Kotlin Multiplatform project: Gradle modules (shared contract, Compose client, server-common plus one module per server build), targets, commonMain versus platform source sets, feature packages, which server engine a build runs on and what it costs, the library-scale module cut. Use for 'set up the KMP project', 'add a module or target', 'where does this class go', 'split the module', 'CIO or Netty' in Kotlin/Gradle code."
 ---
 
 # Kotlin Multiplatform project structure
@@ -184,6 +184,49 @@ hierarchy. The test: a package at the root is one that several features import a
   Composable names are capitalised). A rule without a reason gets "fixed" by the next reader.
 - **Kotlin/Native release tests are a separate test run** (`testRuns.create("release")`); see
   `kmp-testing` for why that run is mandatory.
+
+## The server engine is a per-build decision, and it is not free
+
+`:server-common` must not name an engine: each build's `main` picks its own. The native build has
+no choice — Netty and Jetty are Java libraries, so Kotlin/Native servers run on CIO. The JVM build
+does have a choice, and it is worth making deliberately.
+
+**What it costs.** Measured on one service with three kinds of endpoint, the same jars and the same
+process, 64 keep-alive connections, the JVM pinned to eight cores ([the stand and every
+number](https://kotlin.website/blog/three-ktor-engines-under-one-protocol)):
+
+| Engine | CPU µs per request | p99 | context switches per request |
+|---|---|---|---|
+| CIO | 166 | 13.5 ms | 2.5 |
+| Netty | 82 | 2.05 ms | 0.63 |
+| Jetty | 146 | 2.94 ms | 9.6 |
+
+The difference is not the HTTP work — all three put the same bytes on the wire — but how a request
+reaches a handler. CIO dispatches every call through `Dispatchers.IO`, which on the JVM is a
+`LimitedDispatcher` with one lock-free queue and `max(64, availableProcessors)` workers polling it;
+at tens of thousands of requests per second those workers contend for the head of that queue, and
+that contention is a third to a half of the process's CPU. Netty runs the handler on the channel's
+own event loop and usually does not dispatch at all. Jetty hands over through a `SynchronousQueue`,
+paying in thread wake-ups instead.
+
+**Which to choose.**
+
+- **Handlers that never block** (suspend all the way down, non-blocking driver): Netty is the
+  cheaper default on the JVM. Staying on CIO, set `-Dkotlinx.coroutines.io.parallelism` to the
+  core count — worth +70 % throughput and a p99 six times lower on the service above.
+- **Handlers that block a thread** — JDBC, file I/O, a library with its own threads: those 64
+  workers are the slack that keeps the service serving, and the same property costs 7.7x when a
+  handler sleeps 5 ms. Netty is the *worst* default choice here, because `callGroupSize` defaults
+  to the processor count; raise it if you pick Netty with blocking handlers.
+- A service that waits on a database at a few hundred requests per second pays ~3 % for the
+  handoff and should pick its engine on other grounds entirely.
+
+**The escape hatch you do not have.** CIO keeps its dispatcher in a private field and overrides a
+dispatcher supplied through the parent coroutine context, so the engine cannot be given a
+`limitedParallelism` view of its own; the process-wide property is the only lever
+([KTOR-6797](https://youtrack.jetbrains.com/issue/KTOR-6797) is the open request for the knob).
+Because the property is process-wide, a service that also uses `Dispatchers.IO` for blocking work
+of its own cannot tune one without the other.
 
 ## Configuration
 
