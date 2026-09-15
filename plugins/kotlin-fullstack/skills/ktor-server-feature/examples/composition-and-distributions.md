@@ -93,6 +93,13 @@ private fun Application.commonPlugins() {
             // kotlinx does NOT write defaults. Without this a response arrives without its
             // defaulted fields, and a typed client where the field is mandatory fails to parse.
             // Only a test against a real client catches it.
+            //
+            // THE OTHER SIDE OF THE SAME SWITCH, when a service deliberately keeps `false`: a
+            // counter that can legitimately be zero (`attempts`, `walBytes`, `pending`) then
+            // disappears from the response, and the reader cannot tell an absent key from a zero —
+            // which is how 931 MB of WAL was once reported as "well under the limit". Whichever way
+            // this is set, the rule is the same: a field whose zero is meaningful carries NO default
+            // in the DTO, so the question never arises for it.
             encodeDefaults = true
         })
     }

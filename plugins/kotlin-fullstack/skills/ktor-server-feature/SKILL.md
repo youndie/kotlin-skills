@@ -1,6 +1,6 @@
 ---
 name: ktor-server-feature
-description: "Add or change a route, use case, repository, worker or DI binding on a Kotlin Ktor server (JVM, Kotlin/Native, or both): the feature package, use cases with typed errors, tiers decided at the mount, tenant and ownership filters, StatusPages with an error reporter, per-driver storage, which tests to write. Use for 'add an endpoint', 'add a route', 'implement a server feature', 'fix a 500', 'add a worker' in Ktor code. Not for a new service or the contract itself."
+description: "Add or change a route, use case, repository, worker or DI binding on a Kotlin Ktor server (JVM, Kotlin/Native, or both): the feature package, use cases with typed errors, tiers decided at the mount (including a route whose signature IS its authentication), routes whose body is raw bytes that must not be parsed, tenant and ownership filters, StatusPages with an error reporter, per-driver storage, which tests to write. Use for 'add an endpoint', 'add a route', 'implement a server feature', 'fix a 500', 'add a worker', 'receive a webhook', 'verify an HMAC signature', 'принять вебхук', 'проверить подпись' in Ktor code. Not for a new service or the contract itself."
 ---
 
 # A feature on a Ktor server
@@ -140,6 +140,52 @@ Rules paid for with defects:
   failures the route does map (`SaveFailure` → `500`) are reported by the route.
 - **Error-family dispatchers** (`dispatchInventoryError`) live next to the use cases whose errors
   they map, so every route that can hit them answers the same way.
+- **A handler does not read the clock.** `Clock.System.now()` inside a handler makes the behaviour
+  untestable at the one place it matters — expiry, tolerance, a window — and the portfolio's ktlint
+  rule (`kapkan:wall-clock`) refuses it. Read the clock **once at the composition root**, suppressed
+  there with its reason, and pass `nowEpochSeconds: () -> Long` into the routing function; every
+  handler then takes the time as something a test can supply. The exception that proves it: a
+  signature scheme comparing a sender's timestamp against *this host's* clock inside a tolerance is
+  deliberately reading local time, and that is exactly the decision worth writing down next to the
+  suppression rather than leaving scattered through handlers.
+
+### When the body is bytes that must not be touched
+
+The shape above — `call.receive<T>()`, a DTO, `ContentNegotiation` — is right for a typed API and
+**actively wrong for a route that verifies a signature over the request body**. A webhook receiver
+(GitHub, Stripe, Telegram, any HMAC scheme) signs *the exact bytes*; any convenience that parses and
+re-serialises changes whitespace or key order and destroys the signature. It fails in the direction
+that hurts most — rejecting genuine traffic — and it fails silently, because the code looks correct.
+
+```kotlin
+post<HookResource> { hook ->
+    // The declared length is checked BEFORE the read: a limit that buffers first defends nothing.
+    val declared = call.request.headers[HttpHeaders.ContentLength]?.toLongOrNull()
+    if (declared != null && declared > maxBodyBytes) { call.respond(HttpStatusCode.PayloadTooLarge, …); return@post }
+
+    // One byte past the limit, so a body that lies about its length is caught by the same check
+    // rather than by a second one that can disagree with the first.
+    val body = call.receiveChannel().readRemaining(maxBodyBytes + 1).readByteArray()
+    if (body.size > maxBodyBytes) { call.respond(HttpStatusCode.PayloadTooLarge, …); return@post }
+
+    acceptEvent(Params(hook.endpointId, SignedRequest({ call.request.headers[it] }, body, now()), …))
+}
+```
+
+- **Nothing on this path parses the body** until it has been verified and stored. The bytes travel
+  into the use case as a `ByteArray`; the response DTO is typed as usual, only the request is not.
+- **The size limit is checked twice on purpose**, against the declared length and against what was
+  actually read, and both use the same constant.
+- **Compare digests in constant time.** A `contentEquals` on a signature is a timing oracle; write
+  the loop that ORs the differences and returns at the end.
+- **Distinguish "no signature", "wrong signature" and "stale signature"** as separate typed errors
+  even when two of them answer the same status. A skewed clock and a wrong secret are different
+  incidents, and an operator who cannot tell them apart debugs the wrong one for an afternoon.
+- **`401`, not `403`** — the request failed to prove who it is, it was not refused permission. It
+  also matters to the sender: GitHub and Stripe treat `4xx` as final and retry `5xx`, which is the
+  behaviour you want for a bad signature and not for a storage failure.
+- **The same answer for an unknown endpoint and a disabled one.** A distinct status turns the route
+  into an oracle for which ids are real.
 
 ## Tiers are decided at the mount
 
@@ -162,9 +208,21 @@ routing {
 | service-to-service | `authenticate` + `withRole` / `withAnyRole` at the mount | the tenant header is read **raw on purpose**: the calling service acts across tenants and the role is the gate |
 | management | a separate engine on a separate port plus a token plugin over the branch | outside is a `404`, not a `403` |
 | open | outside `authenticate` | health, version, third-party callbacks |
+| the signature is the authentication | **no gate at all**, deliberately | the endpoint id in the path selects the secret and the scheme; verification is the tier |
 
 A raw tenant header is a leak only on a route whose sole gate is "authenticated". A route
 without a chosen tier has whatever the default gives it, usually open.
+
+**The last row is a tier, not a missing one, and it has to be written down as such.** An inbound
+webhook cannot be wrapped in `authenticate { }` — the sender is GitHub, it will not carry your token
+— so the mount looks exactly like an oversight. Say in the routing function's KDoc that the absence
+is the contract, and make the verification per-endpoint rather than per-install: the scheme, the
+secret and its tolerance are configuration of the endpoint being posted to, resolved from storage by
+the id in the path. Two consequences that are easy to miss: **an endpoint that verifies nothing
+(`scheme = none`) must not produce the same journal entry as one that verified something** — carry
+the secret's fingerprint as nullable and let absent mean "proved nothing"; and **secret rotation
+means a list of candidate secrets, not one**, or every rotation is an outage for whatever is still
+signing with the old one.
 
 **`withAccess(min) { (user, tenantId) -> }`** resolves the caller from the principal (by `azp`:
 an email for a human client, a header for a bot client), compares their role in the tenant
