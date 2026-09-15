@@ -269,7 +269,10 @@ logging the refused origin turns "the form does nothing" into a line. Code:
   wrapped and reported.
 
 Port, both driver implementations, transaction adapters, the SQL variant and the migration traps:
-[examples/storage-port-and-implementations.md](examples/storage-port-and-implementations.md).
+[examples/storage-port-and-implementations.md](examples/storage-port-and-implementations.md). The
+Kotlin/Native form — sqlx4k statements, a row mapper, and why the driver's `Result` is unwrapped in
+the repository rather than handed to the use case — is
+[examples/repository-native-sqlx4k.md](examples/repository-native-sqlx4k.md).
 
 ## DI
 
@@ -277,9 +280,46 @@ Port, both driver implementations, transaction adapters, the SQL variant and the
   application lists them. Config objects enter as `single { config.mongo }`.
 - **Explicit lambda for any constructor with a default parameter** (a clock, an interval, an
   `HttpClient` a test swaps): `singleOf` resolves every parameter and fails **lazily**, at the
-  first request of one route, while the pod starts healthy. A `verify()` test misses it too
-  (defaults and nullable parameters are skipped); the graph test **resolves** every injected type,
-  and its list is maintained by hand.
+  first request of one route, while the pod starts healthy. The commonest form is a lambda with a
+  default — `ids: () -> String = { UUID.randomUUID().toString() }` — which reads as configuration
+  and is a request to the container for `Function0`.
+
+### The graph test has two halves, and one of them is not enough
+
+Established by running both against a real graph rather than assumed: the two checks below have
+different blind spots, and the defect above falls in the gap between them.
+
+```kotlin
+@Test fun `every definition can be resolved`() =
+    rideModule(noDatabase).verify(
+        // The engine is assembled by a function that passes all six arguments itself; verify()
+        // cannot see that and asks the container about each one.
+        injections = injectedParameters(definition<SagaEngine>(List::class, SagaRepository::class)),
+    )
+
+@Test fun `the graph really produces the bindings it claims`() {
+    val koin = koinApplication { modules(rideModule(noDatabase)) }.koin
+    assertNotNull(koin.get<RideRepository>())   // a resolution, not reflection
+}
+```
+
+- **`verify()`** walks the constructor of each definition's bound type by reflection and asks
+  whether every parameter has a binding. It builds nothing, so a module that needs a database is
+  checked without one. Values a lambda passes by hand are declared with
+  `injections = injectedParameters(definition<T>(…))` — **per definition**, never a global
+  `extraTypes`, so that the same type genuinely missing somewhere else stays visible. **Its blind
+  spot is any parameter with a default**, lambda or `Int = 5` alike; a non-default lambda it does
+  catch (`Missing definition … Function0`). So the trap above does *not* fail `verify()`.
+- **Resolving by type** from `koinApplication { }.koin` builds the object and fails with
+  `InstanceCreationException` wrapping `NoDefinitionFoundException`. This is the only half that
+  sees a defaulted parameter. Resolve the bindings whose construction opens nothing; stub the rest.
+- **A guard on the guard.** `verify()` passes over an empty module and a resolution test that
+  resolves nothing passes too, so the second test must fetch at least one real binding. Asserting
+  "the module is not empty" through `module.mappings` is not the way: it is `@KoinInternalAPI` and
+  will not compile under `-Werror`.
+
+A module declared as a function (`rideModule(database)`) is checked the same way, with a stub for
+the parameter.
 
 ## Where the tests go
 
@@ -310,6 +350,12 @@ report a task up to date while the XML is from the previous run.
   plugins, mocking libraries) and what replaces it; the **release test run is mandatory** because
   the release binary omits type-cast checks; liveness never touches storage because a vanished
   database can hang a native query. Table in [examples/composition-and-distributions.md](examples/composition-and-distributions.md).
+  **Koin is the default there too** — it is multiplatform and `koin-ktor` publishes `linuxx64`, so
+  the layers move across verbatim. `ktor-server-di` avoids one dependency and charges for it:
+  `resolve()` is `suspend`, so dependencies are threaded through every routing function as
+  parameters instead of `by inject`. One service in this portfolio added the library and **never
+  wired it**, assembling everything by hand in `Application.kt` — an inconvenient prescription is
+  not disobeyed, it is quietly bypassed, which is worth knowing before choosing it.
 - **The engine the build runs on** (CIO, Netty, Jetty): a project-layout decision, not a feature
   one, and a measured one — handing a request to a handler is a third to a half of a CIO service's
   CPU against one to two per cent of a Netty one, and the right answer flips when handlers block.
@@ -322,6 +368,47 @@ report a task up to date while the XML is from the previous run.
   committed spec is regenerated in the same change and CI fails on a diff. Two traps: one
   KDoc-style annotation turns inference off for the whole file; `call.receive` inside a shared
   handler function is invisible, so bodies are declared in `describe`. Internal routes are hidden.
+
+## Bringing a grown service to layers
+
+A service written straight through — routes calling concrete classes, no DI, paths as strings — is
+converted **one feature at a time**, never in one pass. The target state is everything above; what
+follows is the order and the part that is easy to get wrong.
+
+Each step is its own commit, with the suite green:
+
+1. **A container and one binding**, routes untouched: one repository moves into `single<T>` /
+   `provide<T>` and the composition root resolves it instead of constructing it. Every later one is
+   then cheap.
+2. **A `@Resource` on the best-documented endpoint.** Put the typed contract first where the
+   document has already drifted from the code, or is about to: it is the one step that pays
+   immediately.
+3. **Extract the interface from the repository** — only once there is a second consumer or a second
+   source of data. Against tests that run on a real database, an interface for its own sake does not
+   pay for itself.
+4. **Name the orchestration a use case.** In a service that grew this way it usually exists already,
+   as a facade or a fat handler; this is a rename and a move, not new code.
+
+A dependency that is still constructed by hand before DI starts enters the graph as a value, not as
+a construction:
+
+```kotlin
+fun ordersModule(legacyPricing: PricingService) = module {
+    single { legacyPricing }
+    singleOf(::OrderRepositoryImpl).bind<OrderRepository>()
+}
+```
+
+That is a temporary bridge, deleted when the other feature moves too — not an exception to the
+architecture.
+
+What not to do:
+
+- **Do not rewrite everything at once.** Both styles coexist for a while. A large refactor has no
+  green point in the middle; a per-feature migration has one after every step.
+- **Do not start with interfaces.** The most visible layer and the cheapest in effect.
+- **Do not call it "a refactor".** It is a migration towards a contract that is written down; with
+  no target state on paper the work turns into taste.
 
 ## Checklist before the change is done
 
