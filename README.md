@@ -19,6 +19,13 @@ testing and design skills lean on; `design-to-compose` needs its `viddikDesignPa
 documentation format and checks the briefs are shaped for.
 `backlog-item` works that format's file-per-item backlog; the reference project keeps no backlog
 of its own, so the pick rule is exercised on the docs-bootstrap example, not on mani.
+`native-service-bootstrap` has its own sources, all of them public: the services it was written from
+([katcher](https://github.com/youndie/katcher), [metrik](https://github.com/youndie/metrik),
+[tracy](https://github.com/youndie/tracy), [shildik](https://github.com/youndie/shildik)) and the two
+libraries that now carry most of what it used to spell out — the Gradle conventions in
+[sborka](https://github.com/youndie/sborka) and the process lifecycle in
+[kore](https://github.com/youndie/kore). That split is deliberate and the skill says so: **a
+convention compels, a skill describes**, and where the two disagree the convention is right.
 
 ## Skills
 
@@ -29,6 +36,7 @@ of its own, so the pick rule is exercised on the docs-bootstrap example, not on 
 | [`kmp-project-structure`](plugins/kotlin-fullstack/skills/kmp-project-structure/SKILL.md) | starting a KMP project, adding a module or target, deciding where a class belongs, shaping packages |
 | [`kmp-shared-contract`](plugins/kotlin-fullstack/skills/kmp-shared-contract/SKILL.md) | adding or changing an endpoint or a DTO; anything about how the client and the server talk |
 | [`ktor-server-feature`](plugins/kotlin-fullstack/skills/ktor-server-feature/SKILL.md) | a route, a validation rule, a storage port and its per-build implementations, DI, auth, errors |
+| [`native-service-bootstrap`](plugins/kotlin-fullstack/skills/native-service-bootstrap/SKILL.md) | standing up a **new** Kotlin/Native service: targets, config, migrations and the SQLite pool, ordered shutdown and probes, the runtime image, the chart, CI — and the two allocators that decide whether it survives its container limit |
 | [`compose-client-feature`](plugins/kotlin-fullstack/skills/compose-client-feature/SKILL.md) | a screen or feature on the client: repository, use case, view model, Component / Content, navigation, session |
 | [`design-to-compose`](plugins/kotlin-fullstack/skills/design-to-compose/SKILL.md) | implementing a screen from a Claude Design canvas or design PNGs and proving it matches: reference PNGs, tokens, fixtures, `viddikDesignParity`, the diff loop |
 | [`kmp-testing`](plugins/kotlin-fullstack/skills/kmp-testing/SKILL.md) | writing or placing any test; why a green build missed a bug |
@@ -40,11 +48,16 @@ How they relate:
 product-brief  ──▶  docs-bootstrap (documentation tree, backlog)  ──▶  backlog-item, under /loop
       └──▶  design brief  ──▶  Claude Design canvas  ──▶  design-to-compose      (one item → one PR, with the skills below)
 
-kmp-project-structure  ──▶  kmp-shared-contract  ──▶  ktor-server-feature
-        (modules)               (the wire)         ──▶  compose-client-feature  ◀──  design-to-compose
-                                                          │                          (canvas → reference PNGs → parity loop)
-                                                          ▼
-                                                     kmp-testing
+kmp-project-structure  ──▶  kmp-shared-contract  ──▶  ktor-server-feature  ──▶  kmp-testing
+        (modules)               (the wire)                      ▲
+                                                                │
+                            native-service-bootstrap  ──────────┘
+                            (a NEW standalone Kotlin/Native service, up to the first /health
+                             from the image; the second endpoint is already a feature)
+
+kmp-shared-contract  ──▶  compose-client-feature  ◀──  design-to-compose  ──▶  kmp-testing
+                                                       (canvas → reference PNGs → parity loop)
+
               kotlin-conventions  (names, abstractions, comments — across all of the above)
 ```
 
