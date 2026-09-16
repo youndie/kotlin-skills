@@ -309,7 +309,7 @@ installKoreProbes(probes.startup, probes.readiness, probes.liveness)
 installKoreVersion(KoreBuildIdentity)
 ```
 
-Five things the code does not show, each of which has already cost somebody time:
+Seven things the code does not show, each of which has already cost somebody time:
 
 * **`start(wait = false)`.** With `true` the main thread never reaches the signal wait, the sequence
   never runs at all, and the process is killed at the end of the grace period — from outside,
@@ -321,6 +321,20 @@ Five things the code does not show, each of which has already cost somebody time
 * **The deadlines and the chart's `terminationGracePeriodSeconds` are one number in two places.** No
   platform tells a process its real budget; kore takes the one it is *told*. The plan's sum must be
   smaller: in katcher 2 + 10 + 3×3 = 21 against 30.
+* **Participants registered in one stage run concurrently.** `runStage` launches all of a stage's
+  participants and joins them; only the *stages* are ordered. So `consumer(a)` before `consumer(b)`
+  orders nothing, however much it reads like a list of steps. An order needed **inside** a stage is
+  written as composition — one participant calling two things in sequence — and an order needed
+  between resources is written as a **later stage**. Getting this wrong is quiet: the stage still
+  reports `COMPLETED`, and the collision surfaces as an intermittent deadline on a slower machine.
+* **`cancel()` is not "stopped", it is "told to stop".** A `stop()` that cancels its loop's job
+  without joining it returns while the work is still in flight, and on Kotlin/Native that work is
+  often inside an FFI call cancellation never reaches — so it runs on **into the next stage** and
+  collides with what that stage does. `cancelAndJoin` in every background loop's `stop()`. A stage
+  that suddenly reports 200 µs is not healthy, it is a stage where nobody waited for anything.
+  kore's own `HealthRegistry.stop()` cancels without joining
+  ([youndie/kore#79](https://github.com/youndie/kore/issues/79)); until that changes, give the
+  registry a scope of its own and join that scope in the participant.
 * **`/version` is generated source.** Kotlin/Native has neither resources nor a manifest; the plugin
   writes an object and puts it into `commonMain`. `commit` will be `unknown` wherever the build
   context has no `.git` — the usual case being `.dockerignore`. And beware: a file git **tracks**
@@ -330,6 +344,12 @@ Five things the code does not show, each of which has already cost somebody time
 The fact to check is not "it compiled" but the transcript: `docker stop` on the container must leave
 `SIGNAL / ANNOUNCE / DRAIN / RELEASE_CONSUMERS / RELEASE_POOLS / EXIT` in the log, each with the word
 `COMPLETED`. Worth checking in CI as well: shutdown is the one part of the lifecycle nobody watches.
+
+**And check what the stages were supposed to accomplish, not only that they ran.** A participant that
+throws is recorded by kore as a failure while its stage still reports `COMPLETED`, so a transcript
+check alone goes green over a release step that quietly stopped working. Pair it with one fact on
+disk — for a service with a journal, that the journal was folded away; see
+[references/sqlite-under-load.md](references/sqlite-under-load.md).
 
 ### 7. The Dockerfile: the binary is built **outside**
 
