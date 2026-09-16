@@ -30,19 +30,54 @@ results that work and still missed their line, one red, and one setting validate
 repository. Step 1's `MALLOC_ARENA_MAX`
 paragraph gained its counter-example on 2026-09-15, from the Ktor-under-a-container-limit study —
 the first measurement here where a recipe from this file made a service **worse**, and the reason the
-paragraph now ends in a rule rather than a number. Most of the value here is not the templates but the
+paragraph now ends in a rule rather than a number. **Step 0 changed on 2026-09-16**: it said "copy
+metrik or katcher" and now says "clone [keel](https://github.com/youndie/keel)", because a template
+without a domain arrived — and the first service built from it needed no change to any of its
+infrastructure files, which is the claim that made the swap worth making rather than the existence of
+the repository. Most of the value here is not the templates but the
 **"Gotchas already paid for" section**: each of those cost between a day and several months of silent
 breakage in production.
 
-## Step 0. Copy a living service, not the template in this file
+## Step 0. Start from keel, not from the template in this file
 
-Open `metrik` (newer) or `katcher` (longer in production) and copy **their** structure: module
-names, the `sourceSets` layout, `Application.kt`, `Migrate.kt`, `charts/`, `.github/workflows/`. The
-templates in this file are about what each step means and in what order; take the idioms from the
-repository, they are newer.
+```bash
+git clone https://github.com/youndie/keel <name> && cd <name>
+```
+
+Then rename, and renaming is genuinely all of it: the package, the `sborka.group`, the config prefix,
+`nativeService { entryPoint; baseName }`, `rootProject.name`. Measured on the first service built this
+way — a webhook relay — that came to **249 lines across 32 files, every one of them a substitution**,
+against 178 lines of the service's own domain. No file under `Dockerfile`, `Makefile`,
+`settings.gradle.kts`, `gradle.properties`, `.github/` or `scripts/` had to change at all.
+
+[keel](https://github.com/youndie/keel) is a template repository: two targets that both run, a store
+that works on both, an ordered shutdown, three probes, `/version`, an image, and a documentation tree
+that passes its own gate. **Clone to both halves answering `/health/ready` is 3 min 48 s** on a
+machine that has never seen the portfolio, of which the build — almost all of it the Kotlin/Native
+toolchain — is 82 %. Its image is 13 972 497 bytes.
+
+**This replaces "copy metrik or katcher", and the reason is what a copy costs.** Those two carry a
+domain, so copying one starts by deleting things you do not understand, and what you delete is
+decided by what you recognise. keel has one entity on purpose and its CI proves it still builds.
+
+They are still worth opening, for a different question: **the idioms there are newer**, and when one
+of them disagrees with keel, the living service is usually right and keel is usually behind. Copy
+*structure* from keel; copy *style* from metrik or katcher.
 
 Check that the task really is a new service: if a `:server` module already exists and a route has to
 be added, that is `ktor-server-feature`, not this skill.
+
+### What keel does not decide for you
+
+Two things it deliberately leaves open, because both are decisions a service makes about itself:
+
+* **outbound TLS.** keel makes no outbound calls, so it ships no HTTP client. `ktor-client-cio` is the
+  obvious one to reach for beside `ktor-server-cio` and **it has no TLS on Kotlin/Native** — it
+  compiles, links and resolves, and the first `https` request fails at runtime with `TLS sessions are
+  not supported on Native platform.` Outbound TLS means `ktor-client-curl`, which links libcurl and so
+  changes the runtime image and puts the service outside sborka's `scratch` recipe. Decide it when the
+  service is created, not when the first call fails;
+* **a chart.** keel ships none: a chart is a decision about a cluster, and step 9 is where it belongs.
 
 ## Where this skill ends
 
@@ -474,6 +509,14 @@ and how to measure your own before/after without measuring the Gradle cache — 
 
 Not "possible problems" but things found by a run and a deploy. The references are to the metrik
 research (`docs/research/research-architecture.md` in [metrik](https://github.com/youndie/metrik)).
+
+* **`ktor-client-cio` has no TLS on Kotlin/Native.** It compiles, links and resolves next to
+  `ktor-server-cio`, and the first `https` request fails at runtime with `TLS sessions are not
+  supported on Native platform.` Outbound TLS means `ktor-client-curl`, which links libcurl — so the
+  runtime image gains a shared library and the service leaves sborka's `scratch` recipe, which is
+  exactly why that research excludes metrik's `:server` and shildik's `:distribution`. Decide it when
+  the service is created; found by the first service built from keel, whose entire job was forwarding
+  a payload to somebody else's URL.
 
 | Gotcha | Symptom | What to do |
 |---|---|---|
