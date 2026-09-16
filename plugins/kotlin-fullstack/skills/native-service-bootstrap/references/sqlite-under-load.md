@@ -39,3 +39,32 @@ it** — nor does any size ceiling counting the same pages. In tracy, 931 MB of 
 file that was filling the disk. Report `walBytes` as its own field, and **without a default in
 `@Serializable`**: `encodeDefaults = false` drops a field equal to its default, and zero turns into
 an absent key.
+
+**The last checkpoint of the process cannot be taken while the pool is open.** `TRUNCATE` has to wait
+for every *other* connection to the database, and the pool's own second connection is one of them —
+idle, holding nothing of yours, and still enough. Registered as an ordinary release participant it is
+bimodal: 5–29 ms when it slips through, and past the whole stage's deadline when it does not, which
+on a CI runner is a red build roughly one push in ten.
+
+Settled by experiment rather than by argument, in
+[xyk](https://github.com/youndie/xyk): same image, same host,
+`--cpus 0.5`, **0 stalls in 20 rounds at a pool of one against 5 in 30 at the shipping pool of two**.
+So take it **after** `close()`, on a connection you open for it:
+
+```kotlin
+pool(
+    participant("sqlite") {
+        sweep.stop()                 // the periodic loop only — cancelAndJoin, see SKILL.md step 6
+        db.close().getOrThrow()
+        lastCheckpoint(config.sqlitePath)   // a one-connection handle, TRUNCATE, close
+    },
+)
+```
+
+Two things this costs you if you skip them. The participants of one stage run **concurrently**, so
+moving the checkpoint "after" the flush by registering it later changes nothing — it has to be in a
+later stage or in the same participant. And **assert the result on the file**, not on the transcript:
+a participant that throws is recorded as a failure while its stage still reports `COMPLETED`, so a
+checkpoint that quietly stopped working passes every order check there is. Mount a volume in the
+shutdown check and require the `-wal` to be gone: there, 107 152 bytes at `SIGTERM`, absent
+afterwards, with the database grown by exactly its contents.
