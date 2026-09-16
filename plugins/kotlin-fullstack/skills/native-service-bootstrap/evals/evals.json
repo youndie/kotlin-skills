@@ -1,0 +1,80 @@
+{
+  "skill_name": "native-service-bootstrap",
+  "evals": [
+    {
+      "id": 1,
+      "name": "outbound-tls-decides-the-image",
+      "prompt": "In the Kotlin/Native service at {fixture}, add a component that forwards a stored payload to a URL the caller supplies — targets are ordinary https webhook endpoints. Write the code and the build changes. Say anything about this choice a person deploying it should know.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} running-service",
+      "expected_output": "ktor-client-cio is identified as having no TLS on Kotlin/Native before it is depended on, not after a failure. Either ktor-client-curl is chosen and its cost to the runtime image is stated, or cio is chosen and the https limitation is stated as a limitation.",
+      "expectations": [
+        "The answer states that ktor-client-cio has no TLS on Kotlin/Native",
+        "That statement appears as a reason for the dependency choice, not as a caveat added after proposing cio for https traffic",
+        "If ktor-client-curl is chosen, the answer says it links libcurl and therefore changes what the runtime image must carry",
+        "The answer does not claim ktor-client-cio will work against an https target",
+        "The decision is framed as one to take when the service is created rather than when the first call fails"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "cancellation-is-not-swallowed",
+      "prompt": "In {fixture}, write a background worker that sweeps the Outbox every second: take what is pending, settle each entry, and keep going. It runs for the life of the process and must stop when its scope is cancelled. A sweep that throws must not kill the worker.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} sweep-loop",
+      "expected_output": "The loop catches failures without swallowing CancellationException: either it rethrows CancellationException before catching Throwable, or it uses a form that does not catch cancellation at all. The caught failure is reported rather than discarded.",
+      "expectations": [
+        "CancellationException is not caught and discarded by the loop's error handling",
+        "The code either rethrows CancellationException explicitly or uses a construct that never catches it",
+        "The failure that is caught is logged, printed or otherwise surfaced, not silently dropped",
+        "The answer explains that a bare runCatching or catch (Throwable) around a suspend call would catch cancellation and leave the loop running",
+        "The worker's loop condition or structure lets a cancelled scope actually end it"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "native-service-block-before-the-targets",
+      "prompt": "Convert the build of the service at {fixture} to use the portfolio's sborka conventions, so the binary gets a stable name and a staged path. Do not configure binaries.executable by hand.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} running-service",
+      "expected_output": "io.github.youndie.sborka.native-service is applied and the nativeService { entryPoint; baseName } block appears above the kotlin { } block, because the convention reads entryPoint when the target declares its binary.",
+      "expectations": [
+        "The build file applies io.github.youndie.sborka.native-service",
+        "The nativeService { } block appears before the kotlin { } block in the file",
+        "entryPoint and baseName are set inside nativeService { }",
+        "No binaries.executable block is written by hand in the service's own build file",
+        "The answer explains that a nativeService block placed after the targets fails with a message naming neither the ordering nor the block"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "health-is-not-readiness",
+      "prompt": "The service at {fixture} is going into Kubernetes. Wire its health endpoints using the portfolio's kore library and write the probe configuration a chart would use. Explain which probe points where.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} running-service",
+      "expected_output": "installKoreProbes is used, and the readiness probe points at /health/ready rather than /health, because /health is an alias for liveness and a readiness probe there cannot fail while the process is alive.",
+      "expectations": [
+        "installKoreProbes is used rather than a hand-written health route",
+        "The readiness probe in the chart configuration points at /health/ready",
+        "The readiness probe does not point at /health",
+        "The answer states that /health is an alias for liveness",
+        "The answer explains the consequence: a readiness probe on /health cannot fail while the process is alive"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "nothing-closes-in-applicationstopping",
+      "prompt": "The service at {fixture} opens a database connection pool at startup. Make sure it is closed cleanly when the process is asked to stop, so no in-flight request loses its connection. Show the wiring.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} running-service",
+      "expected_output": "The pool is closed as a kore release-stage participant after the drain, not in an ApplicationStopping handler, because that handler runs before the drain on Kotlin/Native and after it on the JVM from identical source.",
+      "expectations": [
+        "The pool is not closed in an ApplicationStopping or ApplicationStopPreparing handler",
+        "The close is registered with kore's shutdown sequence so that it runs after the drain",
+        "The answer states that ApplicationStopping runs on opposite sides of the drain on JVM and Kotlin/Native",
+        "The answer does not suggest addShutdownHook",
+        "runUntilSignal or the shutdown sequence is placed after the server has started serving"
+      ]
+    }
+  ]
+}
