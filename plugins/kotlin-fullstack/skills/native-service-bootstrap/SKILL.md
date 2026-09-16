@@ -333,8 +333,9 @@ Seven things the code does not show, each of which has already cost somebody tim
   collides with what that stage does. `cancelAndJoin` in every background loop's `stop()`. A stage
   that suddenly reports 200 µs is not healthy, it is a stage where nobody waited for anything.
   kore's own `HealthRegistry.stop()` cancels without joining
-  ([youndie/kore#79](https://github.com/youndie/kore/issues/79)); until that changes, give the
-  registry a scope of its own and join that scope in the participant.
+  ([youndie/kore#79](https://github.com/youndie/kore/issues/79)); `stopAndJoin()` is the fix and
+  arrived in [youndie/kore#80](https://github.com/youndie/kore/pull/80), so on anything older give
+  the registry a scope of its own and join that scope in the participant instead.
 * **`/version` is generated source.** Kotlin/Native has neither resources nor a manifest; the plugin
   writes an object and puts it into `commonMain`. `commit` will be `unknown` wherever the build
   context has no `.git` — the usual case being `.dockerignore`. And beware: a file git **tracks**
