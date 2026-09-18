@@ -258,6 +258,7 @@ above. Then read for:
 - [ ] a default parameter on a constructor registered with `singleOf` / `factoryOf`
 - [ ] a generic bound to DI without a name
 - [ ] `value +=` on a shared flow; a mutable collection type in a UiState
+- [ ] a platform lookup with a fixed answer — `currentSystemDefault()` above all — inside a row mapper, a `filterKeys` or a composable body
 - [ ] a KDoc that restates the name; a `@Suppress` without a reason
 - [ ] a comma in a backticked test name; non-English text in code
 - [ ] anything that describes your machine rather than the product
