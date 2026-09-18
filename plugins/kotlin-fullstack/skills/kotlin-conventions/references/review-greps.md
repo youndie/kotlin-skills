@@ -61,6 +61,19 @@ grep -rn --include='*UiState.kt' -E 'val [a-zA-Z]+: (List|Map|Set)<' .
 ```
 
 ```bash
+# Platform lookups with an unchanging answer, called per row or per element rather than resolved once
+# (on Kotlin/Native currentSystemDefault() is ~33 us a call, so a per-row one is paid per row)
+grep -rn --include='*.kt' -E 'currentSystemDefault\(\)|TimeZone\.of\(|Locale\.getDefault\(\)' . | grep -v '/build/'
+```
+
+Read each hit for two things, in this order. **Does the module declare a native target?** Without
+one the platform caches the answer and the hit is noise — check `build.gradle.kts`, do not assume
+from the module's name. **Is it called per unit of work or once?** A constructor default, a `val`
+on an object or a `remember { }` is already right; inside a row mapper, a `filterKeys` or a
+composable body is the defect. Count calls per row, not per file: one row of katcher's error list
+crossed the same lookup three times from three different files.
+
+```bash
 # Commas in backticked test names (Kotlin/Native rejects them at compile time)
 grep -rn --include='*.kt' -E 'fun `[^`]*,[^`]*`' .
 ```

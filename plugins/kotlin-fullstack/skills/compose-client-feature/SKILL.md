@@ -369,6 +369,16 @@ default for every feature. [examples/network-and-session.md](examples/network-an
 - One scroll per screen; a `LazyColumn` inside `verticalScroll` fails on infinite height.
 - Wide layouts branch inside the Content on `BoxWithConstraints`, so one screenshot set covers
   both.
+- A platform lookup with an unchanging answer, written where it reads naturally, runs once per
+  recomposition in a composable and once per element in a `filterKeys`. `TimeZone.currentSystemDefault()`
+  is the one that bites, because it is not cached on Kotlin/Native — 33 µs a call on `linuxX64`
+  (katcher [#78](https://github.com/youndie/katcher/issues/78)); what it costs on Apple targets,
+  which go through `NSTimeZone.localTimeZone`, is **not measured, so do not quote that number for
+  iOS**. `remember { }` it in a composable, and hoist `val today = today()` out of the lambda in a
+  view model (mani [#176](https://github.com/youndie/mani/issues/176)). Hoisting is worth doing on
+  every platform regardless of the cost, because it is also a correctness fix: a day read per
+  element can change between elements, and a pass crossing midnight splits one map across two
+  dates.
 
 ## Checklist
 
