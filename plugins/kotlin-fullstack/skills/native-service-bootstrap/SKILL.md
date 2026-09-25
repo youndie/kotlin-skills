@@ -143,7 +143,10 @@ only one real target, the native one**, and a green `jvmTest` proves nothing abo
 **`fixedBlockPageSize=16` is set by the convention, and `MALLOC_ARENA_MAX=2` rides in the reference
 image.** Two allocators sit under a Kotlin/Native service — the runtime's per-thread page cache and
 glibc's arenas — and on this platform resident memory follows the **thread count**, not the live
-heap. That is why a service dies at a limit its heap is nowhere near.
+heap. That is why a service dies at a limit its heap is nowhere near. **The exception is the
+opposite shape — a heap of gigabytes on a few threads:** there 16 KiB pages multiply the pages the
+collector walks and frees with the world stopped, the pause grows tenfold for 1 % of memory saved,
+and the service sets `nativeService { allocatorPageSize = 256 }`, the compiler's own.
 
 What the numbers are, why the second one is dangerous to copy (with `-Xallocator=std` it multiplied
 peak RSS tenfold and OOM-killed three runs of ten), and how to measure your own service — including
@@ -172,8 +175,9 @@ paragraph is stale.
 
 What is enforced, rather than recommended:
 
-* **The allocator page size** — `binaryOption("fixedBlockPageSize", …)`, 16 KiB by default;
-  `nativeService.allocatorPageSize` changes it, `0` opts out. A check on the stand reads the option
+* **The allocator page size** — `binaryOption("fixedBlockPageSize", …)`, 16 KiB by default, right
+  for many threads and a small heap; `nativeService.allocatorPageSize` changes it — 256 for a heap
+  of gigabytes and few threads, where the page count sets the collector's pause — and `0` opts out. A check on the stand reads the option
   back **off the linked binary**, because the obvious version of that check reads `freeCompilerArgs`,
   finds nothing, and goes red on a working build.
 * **`MALLOC_ARENA_MAX=2` in the reference Dockerfile**, pinned by a test, with the counter-example
