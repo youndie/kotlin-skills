@@ -35,6 +35,40 @@ under a deliberately small limit must be killed, otherwise the harness cannot de
 all). Details and the upstream address:
 [KT-89365](https://youtrack.jetbrains.com/issue/KT-89365).
 
+**The counter-case: a heap of gigabytes on a few threads wants 256 KiB, and pays for 16 in pause.**
+Everything above is a service with many threads and a heap of tens of megabytes, where the pages
+held per thread *are* the resident set. Turn the shape around and the same option costs something
+else. At the end of marking, with the world still stopped, every thread's allocator and the heap run
+`PageStore::PrepareForGC` for every size class (Kotlin 2.4.20,
+[`alloc/custom/cpp/PageStore.hpp:24`](https://github.com/JetBrains/kotlin/blob/v2.4.20/kotlin-native/runtime/src/alloc/custom/cpp/PageStore.hpp#L24),
+called from
+[`gc/common/cpp/MainGCThread.hpp:56–69`](https://github.com/JetBrains/kotlin/blob/v2.4.20/kotlin-native/runtime/src/gc/common/cpp/MainGCThread.hpp#L56-L69)):
+it walks the used-page list to its tail and frees every page the previous sweep emptied, one at a
+time. Linear in the number of pages, inside the pause — and the same heap in 16 KiB pages is sixteen
+times as many. Measured on an in-memory store holding about 2 GB live on three threads, CMS, the two
+builds interleaved on one host, three runs each, 60 s of write churn:
+
+| | pause p50 | pause p99 | peak RSS |
+|---|---|---|---|
+| `fixedBlockPageSize=16` | 8.0–10.0 ms | 84–139 ms | 4 237–4 244 MB |
+| `fixedBlockPageSize=256` (the compiler's) | 0.76–0.83 ms | 8–18 ms | 4 290–4 304 MB |
+
+Tenfold on the pause for 1 % of memory. Controls moved the objects marked 4.7× and the garbage made
+during marking 10×, and the pause followed neither: **it follows the page count, so it grows with
+the heap.** That report is not public; the mechanism is the runtime source linked above.
+
+So the rule has two sides, and the convention's default is the first:
+
+| shape | `nativeService.allocatorPageSize` | what goes wrong otherwise |
+|---|---|---|
+| many threads, a heap of tens of megabytes | **16** (the default) | resident memory — the service is OOM-killed under its limit |
+| few threads, a heap of gigabytes | **256** | the collector's stop-the-world pause, an order of magnitude longer |
+
+A service in between measures both — peak memory from the cgroup (below) and the pause from the GC
+log — instead of picking a side by analogy. The per-thread cost comes back at 256 KiB with every
+thread that touches a size class, so a large heap served by a hundred threads pays both and has to
+choose by measurement.
+
 **And read the number the kernel kills on, which is not the process's.** Peak memory comes from the
 cgroup — `memory.peak`, with the kill count from `memory.events`' `oom_kill` — and *not* from
 `/proc/<pid>/status`'s `VmHWM`. `VmHWM` counts the mapped pages of a ten-megabyte binary among other
