@@ -146,7 +146,8 @@ glibc's arenas — and on this platform resident memory follows the **thread cou
 heap. That is why a service dies at a limit its heap is nowhere near. **The exception is the
 opposite shape — a heap of gigabytes on a few threads:** there 16 KiB pages multiply the pages the
 collector walks and frees with the world stopped, the pause grows tenfold for 1 % of memory saved,
-and the service sets `nativeService { allocatorPageSize = 256 }`, the compiler's own.
+and the service sets `nativeService { allocatorPageSize = 256 }` — as long as it allocates from few
+threads; with many, 256 KiB costs more than it saves and the choice is measured.
 
 What the numbers are, why the second one is dangerous to copy (with `-Xallocator=std` it multiplied
 peak RSS tenfold and OOM-killed three runs of ten), and how to measure your own service — including
@@ -177,7 +178,8 @@ What is enforced, rather than recommended:
 
 * **The allocator page size** — `binaryOption("fixedBlockPageSize", …)`, 16 KiB by default, right
   for many threads and a small heap; `nativeService.allocatorPageSize` changes it — 256 for a heap
-  of gigabytes and few threads, where the page count sets the collector's pause — and `0` opts out. A check on the stand reads the option
+  of gigabytes and few allocating threads, where the page count sets the collector's pause (not
+  with many: the reference has the table) — and `0` leaves the compiler's 128. A check on the stand reads the option
   back **off the linked binary**, because the obvious version of that check reads `freeCompilerArgs`,
   finds nothing, and goes red on a working build.
 * **`MALLOC_ARENA_MAX=2` in the reference Dockerfile**, pinned by a test, with the counter-example

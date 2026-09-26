@@ -11,7 +11,9 @@ to know the option's name. `nativeService.allocatorPageSize` changes the number 
 compiler's default — read the rest to decide whether your service is one that should, not to decide
 whether to add a line.
 
-The Kotlin/Native allocator keeps a page per size class **per thread** (256 KiB by default), a
+The Kotlin/Native allocator keeps a page per size class **per thread** (128 KiB by default in 2.4.20,
+[`NativeSecondStageCompilationConfig.kt:235`](https://github.com/JetBrains/kotlin/blob/v2.4.20/kotlin-native/backend.native/compiler/ir/backend.native/src/org/jetbrains/kotlin/backend/konan/NativeSecondStageCompilationConfig.kt#L235);
+256 until [KT-68909](https://youtrack.jetbrains.com/issue/KT-68909) halved it in 2024), a
 thread holds it for as long as it lives, and `Dispatchers.IO` grows threads under concurrency. Resident memory follows the **number of
 threads**, not the live heap, and no GC setting bounds it: these are pages, not objects. Measured on
 katcher — same binary, same image, `--memory=192m --cpus=1`, 50 concurrent requests for pages
@@ -51,11 +53,29 @@ builds interleaved on one host, three runs each, 60 s of write churn:
 | | pause p50 | pause p99 | peak RSS |
 |---|---|---|---|
 | `fixedBlockPageSize=16` | 8.0–10.0 ms | 84–139 ms | 4 237–4 244 MB |
-| `fixedBlockPageSize=256` (the compiler's) | 0.76–0.83 ms | 8–18 ms | 4 290–4 304 MB |
+| `fixedBlockPageSize=256` | 0.76–0.83 ms | 8–18 ms | 4 290–4 304 MB |
 
 Tenfold on the pause for 1 % of memory. Controls moved the objects marked 4.7× and the garbage made
 during marking 10×, and the pause followed neither: **it follows the page count, so it grows with
-the heap.** That report is not public; the mechanism is the runtime source linked above.
+the heap.** The report, with its controls and raw data, is
+[`youndie/kesh` `bench/reports/b-19`](https://github.com/youndie/kesh/tree/main/bench/reports/b-19).
+
+**Both halves of that pause are the runtime's implementation, not the collector's nature**, which is
+worth knowing before tuning around them on a newer Kotlin:
+
+- **The walk is long because of an order.** `PrepareForGC` merges two page lists, and the second merge
+  walks its whole source list to find the tail. JetBrains ordered them so the short list is walked
+  ([`ec891474b0`](https://github.com/JetBrains/kotlin/commit/ec891474b0), January 2023, "we can
+  expect used_ to be larger than ready_"); two weeks later
+  [`7854b01473`](https://github.com/JetBrains/kotlin/commit/7854b01473) rewrote both lines and put
+  them back the other way, and 2.4.20 walks the long list. That is the part paid in every cycle.
+- **The frees are one `munmap` per page.** Every allocator page is its own `mmap` (with
+  `MAP_POPULATE` on Linux) and every empty page is unmapped inside the pause, which the lock-free page
+  stacks require ([`AtomicStack.hpp`](https://github.com/JetBrains/kotlin/blob/v2.4.20/kotlin-native/runtime/src/alloc/custom/cpp/AtomicStack.hpp)).
+  That is the part that sets p99, in the cycles that empty thousands of pages at once.
+
+So check whether the runtime in hand still does both before choosing a page size for the pause; on
+2.4.20 it does, and the page size is the only lever a service has.
 
 So the rule has two sides, and the convention's default is the first:
 
@@ -66,8 +86,21 @@ So the rule has two sides, and the convention's default is the first:
 
 A service in between measures both — peak memory from the cgroup (below) and the pause from the GC
 log — instead of picking a side by analogy. The per-thread cost comes back at 256 KiB with every
-thread that touches a size class, so a large heap served by a hundred threads pays both and has to
-choose by measurement.
+thread that touches a size class, so **a large heap served by many allocating threads pays both**,
+and there 256 KiB can lose on every axis. Measured on a synthetic Ktor service with a configurable
+live heap, Kotlin 2.4.20, CMS, one process on a four-core host, 100 req/s, both CMS pauses per
+collection, two to five starts per cell:
+
+| live heap, allocating threads | 16 KiB: pause p99, RSS | 256 KiB: pause p99, RSS |
+|---|---|---|
+| 512 MB, 5 | 13 ms, 1.2 GB | **1.5–2 ms**, 1.35 GB |
+| 512 MB, 100 | **12–20 ms, 1.3 GB** | 19–37 ms, 3.7–4.4 GB, CPU per request +17–31 % |
+| 128 MB, 100 | **4–6 ms, 0.4 GB** | 20–81 ms, 1.9–2.3 GB |
+| 1 GB, ~100 | 23–32 ms | **3.3–3.5 ms** |
+
+With few allocating threads 256 KiB wins outright; with a hundred it lost at 128 and 512 MB and won
+at 1 GB, presumably because there the heap outweighs the pages the threads hold. The per-thread
+pages would explain the direction; nobody counted them. The compiler's own 128 KiB was not measured on either shape.
 
 **And read the number the kernel kills on, which is not the process's.** Peak memory comes from the
 cgroup — `memory.peak`, with the kill count from `memory.events`' `oom_kill` — and *not* from
