@@ -307,6 +307,8 @@ Shutdown order, three probes and `/version` are written by every service itself,
 quietly breaks one of the three. They exist as a library: [kore](https://github.com/youndie/kore) —
 `io.github.youndie:kore-core`, `kore-ktor` and the Gradle plugin `io.github.youndie.kore.build`.
 They resolve from a private Maven repository under `io.github.youndie`; not on Central yet.
+**Take 0.1.9 or later.** Each release from 0.1.6 to 0.1.9 fixed something the wiring below relies
+on, and a service pinned earlier has the defect whatever its code says.
 
 **Why not by hand.** `EmbeddedServer.stop` runs its steps in the **opposite order** on Kotlin/Native
 and on the JVM. Which means `ApplicationStopping` — the place where every example closes the pool
@@ -321,20 +323,23 @@ fun main() {
     val db = initDb(config)                     // migrations here, before the engine
     val probes = Probes(db)                     // startup / readiness / liveness + HealthRegistry
 
+    val draining = DrainGate()                  // what the refusal reads; NOT readiness
+
     val server = embeddedServer(CIO, configure = {
         connectors.add(EngineConnectorBuilder().apply { port = PORT; host = HOST })
         shutdownGracePeriod = DEADLINES.drain.inWholeMilliseconds
         shutdownTimeout = (DEADLINES.drain + 5.seconds).inWholeMilliseconds
-    }) { module(db, config, probes) }
+        reuseAddress = true                     // CIO's default is false, and native applies it
+    }) { module(db, config, probes, draining) }
 
-    server.start(wait = false)                  // NOT true
+    server.startForKore()                       // NOT start(): not wait = true, and not wait = false
     probes.start(CoroutineScope(SupervisorJob() + Dispatchers.Default))
     probes.startup.markStarted()
 
     runBlocking {
         runUntilSignal(DEADLINES, onFinished = { println(it.transcript) }) {
             announce(AnnounceNotReady(probes.readiness))
-            drain(EngineDrain(server, DEADLINES.drain, DEADLINES.drain + 5.seconds))
+            drain(EngineDrain(server, DEADLINES.drain, DEADLINES.drain + 5.seconds, draining))
             consumer(queueParticipant(queue))   // finish reading what was accepted
             pool(databaseParticipant(db))       // and only then close the pool
         }
@@ -345,16 +350,38 @@ fun main() {
 In the module, three lines — and their order matters too:
 
 ```kotlin
-installShutdownRefusal(isShuttingDown = { probes.readiness.isShuttingDown })  // BEFORE the routes
+installShutdownRefusal(draining)                  // BEFORE the routes; the same gate as EngineDrain
 installKoreProbes(probes.startup, probes.readiness, probes.liveness)
 installKoreVersion(KoreBuildIdentity)
 ```
 
-Seven things the code does not show, each of which has already cost somebody time:
+Ten things the code does not show, each of which has already cost somebody time:
 
-* **`start(wait = false)`.** With `true` the main thread never reaches the signal wait, the sequence
-  never runs at all, and the process is killed at the end of the grace period — from outside,
-  indistinguishable from "it stopped".
+* **`startForKore()`, not `start()`.** With `wait = true` the main thread never reaches the signal
+  wait, the sequence never runs at all, and the process is killed at the end of the grace period —
+  from outside, indistinguishable from "it stopped". `wait = false` is not enough either, on both
+  targets. On the JVM `start()` registers Ktor's own shutdown hook, the JVM runs hooks
+  concurrently, and that one stops the engine at the signal, mid-announce: every probe on a new
+  connection was refused 13 ms after `SIGTERM` ([kore#90](https://github.com/youndie/kore/issues/90)).
+  On Kotlin/Native Ktor's handler is armed between `start` and kore's own, runs `runBlocking` on the
+  signal stack, and a `SIGTERM` in that window **hangs** the process ([kore B-63](https://github.com/youndie/kore/blob/main/docs/backlog/B-63-sigterm-right-after-start-segfaults.md)). `startForKore()`
+  closes both; `EngineDrain` refuses to be built beside a JVM hook that is still on.
+* **The refusal reads a `DrainGate`, never readiness.** Readiness falls at the start of the announce,
+  and the announce exists to keep **serving** while that news reaches every node. A refusal gated on
+  readiness answers `503` to exactly the requests the wait is for. It passed every check for weeks,
+  because it only shows once the pre-drain wait outlasts the requests in flight. Every service wired
+  before kore 0.1.7 did this: `installShutdownRefusal(isShuttingDown = { readiness.isShuttingDown })`
+  is the line to look for, and it is deprecated now. The same gate instance goes to
+  `installShutdownRefusal` and to `EngineDrain`, which opens it as its first act ([kore B-61](https://github.com/youndie/kore/blob/main/docs/backlog/B-61-refusal-starts-at-the-announce.md)).
+* **`reuseAddress = true` on the engine, and a busy port is a configuration error.** CIO defaults the
+  flag to `false`. The JVM ignores that, because the JDK opens every server socket with it on;
+  Kotlin/Native applies it. So a native process restarted in place — a supervisor, a local loop,
+  `--network host` — meets its predecessor's `TIME_WAIT` and cannot bind ([kore B-62](https://github.com/youndie/kore/blob/main/docs/backlog/B-62-native-restart-meets-time-wait.md)). The first
+  restart after turning the flag on still cannot: the old listener needed it too. And on native a
+  failed bind is not an error message: CIO binds inside its own coroutine, and the process ends with
+  `SIGABRT` and fifty lines of stack. If configuration is read through kore's `ConfigSchema`, call
+  `requireListenable(portKey, reuseAddress = true)` after reading it. That makes a port something
+  already holds a one-line refusal naming the variable, with the same flag the engine uses ([kore B-59](https://github.com/youndie/kore/blob/main/docs/backlog/B-59-a-busy-port-aborts-the-native-build.md)).
 * **The database is opened in `main`, before the engine.** Otherwise the release stage has no handle
   on the pool, and closing it is left to `ApplicationStopping` again — that is, in the wrong order.
 * **Nobody calls `HealthRegistry.start(scope)` for you.** Without that call `/health/ready` answers
@@ -373,9 +400,8 @@ Seven things the code does not show, each of which has already cost somebody tim
   often inside an FFI call cancellation never reaches — so it runs on **into the next stage** and
   collides with what that stage does. `cancelAndJoin` in every background loop's `stop()`. A stage
   that suddenly reports 200 µs is not healthy, it is a stage where nobody waited for anything.
-  kore's own `HealthRegistry.stop()` cancels without joining
-  ([youndie/kore#79](https://github.com/youndie/kore/issues/79)); until that changes, give the
-  registry a scope of its own and join that scope in the participant.
+  kore's `HealthRegistry` had the same defect ([youndie/kore#79](https://github.com/youndie/kore/issues/79)):
+  call `stopAndJoin()` in its participant, not the deprecated `stop()`.
 * **`/version` is generated source.** Kotlin/Native has neither resources nor a manifest; the plugin
   writes an object and puts it into `commonMain`. `commit` will be `unknown` wherever the build
   context has no `.git` — the usual case being `.dockerignore`. And beware: a file git **tracks**
