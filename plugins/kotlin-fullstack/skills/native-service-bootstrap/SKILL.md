@@ -301,6 +301,20 @@ threading five repositories through parameters while the MCP facade took four. T
 it is time" never arrives: each next repository is cheaper to append to the existing list than to
 introduce a container for.
 
+**Wire it with kore's `installKoreKoin { modules(…) }` (module `kore-koin`, kore 0.1.12 or later),
+not with `install(Koin)`.** koin-ktor's plugin opens a Koin scope for every call. On Kotlin/Native
+each scope owns a stately `Lock`, which on Linux is a `pthread_mutex_t` in a cinterop `Arena` that
+nothing ever frees. So every request, a 404 and a readiness probe included, leaves 16 + 48 bytes of
+malloc behind for good. On tracy that was 154 MB of a 176 MB resident set after four days, with every allocator
+recipe below already applied. Apple targets and the JVM do not leak, so nothing outside a Linux pod
+shows it.
+
+`installKoreKoin` sets the same container where `get`/`inject` in routes already look. It closes the
+container after the engine stops, and it refuses to run next to the plugin. What it gives up is
+`call.scope` (per-request definitions). A service that needs those keeps the plugin and the leak,
+and should say so in its own docs. How to see the leak, because RSS will not:
+[references/memory-under-a-limit.md](references/memory-under-a-limit.md#a-leak-rss-cannot-show-koin-ktors-scope-per-call).
+
 ### 6. The lifecycle: kore, not `ApplicationStopping`
 
 Shutdown order, three probes and `/version` are written by every service itself, and every service
@@ -562,6 +576,7 @@ research (`docs/research/research-architecture.md` in [metrik](https://github.co
 | **`TimeZone.currentSystemDefault()` is not cached on Kotlin/Native** (katcher [#78](https://github.com/youndie/katcher/issues/78), [#79](https://github.com/youndie/katcher/issues/79)) | nothing fails and nothing looks wrong; the same code on the JVM, where the platform caches the zone, costs nothing — so a JVM build of the same service will not show it to you | 33 µs a call against 73 ns for `Clock.System.now()`. Resolve it once into a `val` and pass it: `now().toLocalDateTime(zone)` went 37.6 µs → 277 ns. Grep before shipping, and count the calls per unit of work rather than per file — one row of katcher's error list crossed the lookup three times, twice mapping the row out of the database and once rendering its age, so a page paid for it once per row per pass |
 | **Kotlin/Native forbids commas in backticked test names** | compilation fails on the test | rename it |
 | **A PASSIVE SQLite checkpoint does not reset the journal while readers are alive** (tracy M-137) | `-wal` grows linearly, the database file stops growing, half an hour later an OOM on a small heap | a 2-connection pool plus your own `wal_checkpoint(TRUNCATE)` on a timer and on size; `walBytes` in the size response |
+| **koin-ktor's `install(Koin)` leaks a native mutex on every request** (kore B-65) | resident memory climbs for days with no load to speak of; RSS over minutes shows nothing, because the Kotlin/Native heap swings more than the leak | `installKoreKoin { … }` from `kore-koin` (step 5). Check by counting malloc chunks, not RSS: [references/memory-under-a-limit.md](references/memory-under-a-limit.md#a-leak-rss-cannot-show-koin-ktors-scope-per-call) |
 | **glibc gives malloc an arena per thread, counting host cores** | resident memory follows the thread count; `smaps` shows a dozen anonymous mappings of 6–12 MB on 64 MB boundaries | `sborka.native-service`'s reference Dockerfile carries `ENV MALLOC_ARENA_MAX=2` and a test in the convention pins it — but **only after an A/B on your own service**: on a service without a database it did nothing, and combined with `-Xallocator=std` it multiplied peak RSS by ten and OOM-killed three runs of ten (§1) |
 | **`PRAGMA synchronous` reaches one connection out of the pool** | "write throughput differs by a multiple" is true for 1/N of the commits, the rest go with a full fsync | a probe of N concurrent transactions; the only fixes are warming every connection or a knob upstream |
 | **A static glibc is not self-contained: `iconv` loads its converters with `dlopen`** (§7) | an image on `scratch` starts, serves static files and `401`, and returns 500 on the first rendered page: `Failed to open iconv for charset UTF-8 with error code 22` | copy `ld.so.cache`, the loader, `libc.so.6` and the **whole** gconv directory — and out of the build stage: `dlopen` requires the same glibc build as the `libc.a`. The five paths and their price: sborka `research-static-binary.md` §1.5c |
