@@ -187,6 +187,40 @@ assertion is in sborka (`NativeImageReferenceTest`, pinning the whole line, valu
 copied into every repository's workflow. It covers the reference Dockerfile. It does **not** cover
 one that has been hand-edited since, and a service that edits its own owns the check for it.
 
+## A leak RSS cannot show: koin-ktor's scope per call
+
+Both allocators above can be applied and measured, and a service can still grow for days.
+tracy did: 176 MB of anonymous memory after four days at a few requests per second, 154 MB of it
+**live** malloc in ~2.9 million small chunks. Under 1 MB of that was free, so this was not
+fragmentation. SQLite held 0.6 MB and the Kotlin/Native heap about 20 MB. The source was
+`install(Koin)`: a Koin scope per call, each owning a Linux mutex that nothing frees (step 5, kore
+B-65).
+
+How it was found, so that the next one can be:
+
+* **Split the anonymous memory by owner before guessing.** `/proc/<pid>/smaps` separates `[heap]`
+  and the 64 MB-aligned mappings (glibc's arenas) from the small mappings where the Kotlin/Native
+  allocator keeps its pages. Here the arenas held 150 of 170 MB, which ruled out every
+  Kotlin/Native knob at once.
+* **In a `FROM scratch` image there is nothing to exec.** `kubectl debug --target=<container>` with
+  a Python image shares the process namespace. The glibc arenas can then be walked through
+  `/proc/1/mem`, from `main_arena`/`mp_`, whose addresses come from `nm` on the image's own
+  binary. Kotlin/Native binaries are not stripped by default.
+  - **Take the addresses from the binary being probed.** The next build moves them, and a probe
+    that reads the old ones answers zero, which looks exactly like a fix.
+  - **The probe lives inside the pod's memory limit.** An uncapped one OOM-killed the service it was
+    measuring. Cap it (`RLIMIT_AS`) and keep its tallies bounded.
+* **Walking the chunks shows what is live, and a stack shows where it came from.** The leak was pairs
+  of 32 and 64-byte chunks. The larger one pointed at the smaller one, which is a cinterop `Arena`
+  chunk list. gdb on a local copy of the image, breaking on `malloc(16)`/`malloc(48)`, showed the
+  stack `Arena.alloc` ← `stately Lock.<init>` ← `Scope.<init>` ← `setupKoinScope`.
+* **Count per request, with a control that is not the route.** 5000 requests to a probe route added
+  about 12 000 pairs, and 5000 to a path that does not exist added about 5 500. A leak in a framework
+  plugin shows up on the 404 too, so the 404 is what separates it from the handler.
+* **RSS over minutes answers nothing here.** The Kotlin/Native heap swings by ±10 MB with each
+  collection, and the 404 control moved RSS as much as the route under test. The count of chunks is
+  what moves; RSS only moves over days.
+
 ## Running the measurement so that it can fail
 
 These sat in the chart step, which is the wrong home: they are not about a chart, they are what
