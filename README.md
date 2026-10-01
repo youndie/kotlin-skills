@@ -94,18 +94,24 @@ for s in plugins/kotlin-fullstack/skills/*; do ln -s "$(pwd)/$s" ~/.claude/skill
 .claude-plugin/marketplace.json          the marketplace: one plugin
 plugins/kotlin-fullstack/
   .claude-plugin/plugin.json
-  skills/<name>/SKILL.md                 the skill (kept under ~400 lines)
+  skills/<name>/SKILL.md                 the skill (400 lines at most)
   skills/<name>/examples/*.md            longer code, lifted from the reference project
   skills/<name>/references/*.md          build-file skeletons, grep checklists
   skills/<name>/scripts/*.mjs            small dependency-free tools a skill runs (node)
   skills/<name>/templates/*.md           documents a skill fills in
   skills/<name>/evals/evals.json         test prompts with checkable expectations (skill-creator shape)
   skills/<name>/evals/files/             fixtures those prompts run against
+scripts/check_plugin.py                  what CI holds every change to
 ```
 
 ## Conventions of this repository
 
 - English throughout.
+- **Every change to a plugin raises its version** in `plugin.json`, because `claude plugin update`
+  compares versions and nothing else: a fix merged under the old number reaches no install. CI
+  (`scripts/check_plugin.py --base`) refuses the pull request otherwise; only `evals/` is exempt.
+  The same script holds the 400-line budget, the description limit, the frontmatter name and every
+  relative link inside a skill — `python3 scripts/check_plugin.py --base origin/main` runs it locally.
 - A rule without a reason is not written down. Where the reason is a defect, the defect is
   described.
 - Nothing here describes a particular machine. A quirk that does not reproduce in CI is not a

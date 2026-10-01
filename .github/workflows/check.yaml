@@ -1,0 +1,32 @@
+name: check
+
+# No path filters: a pull request that touches only the README still runs this, because the cost is
+# seconds and a filter is how a rule stops applying to the change that breaks it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The version rule diffs against the base, which a shallow clone does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # First, because a checker that cannot be shown to fire would make everything after it green.
+      - run: python3 scripts/check_plugin.py --selftest
+
+      - if: github.event_name == 'pull_request'
+        run: python3 scripts/check_plugin.py --base "origin/${{ github.base_ref }}"
+
+      # A push to main is checked against the commit before it, so a change that reached main without
+      # a pull request is held to the same rule. A brand-new branch has no "before" to compare with.
+      - if: github.event_name == 'push' && github.event.before != '0000000000000000000000000000000000000000'
+        run: python3 scripts/check_plugin.py --base "${{ github.event.before }}"
