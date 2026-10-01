@@ -71,3 +71,25 @@ page to render `YYYY-MM-DD HH:MM` — as its own job in CI, against the real ima
 locally.
 
 The full model with a multi-stage build and pre-compressed static files is `examples/deploy.md`.
+
+## The builder/runtime glibc pair, and why no library is copied
+
+Referenced from step 7 of [SKILL.md](../SKILL.md).
+
+**No library is copied out of the builder, and that is enforced.** `sborka.kmp` links Linux
+executables with `-Wl,--as-needed`, which drops the three `NEEDED` entries the program never calls
+— one of them `libcrypt.so.1`, which `gcr.io/distroless/cc` does not carry and which two
+Dockerfiles here used to drag across by hand. **The line is worth removing for what it takes with
+it:** a copied system library couples the two images by glibc, the builder's having to be **no
+newer** than the runtime's, and the mismatch is invisible at build time and fails at exec:
+
+```
+/app/server: libc.so.6: version `GLIBC_2.38' not found (required by libcrypt.so.1)
+```
+
+This is how the move to Java 25 broke: the tag `gradle:9.7.0-jdk25` without a suffix is Ubuntu
+26.04 with glibc 2.43, while `distroless/cc-debian12` carries 2.36. The working pair is
+`gradle:9.7.0-jdk25-noble` (2.39) plus `distroless/cc-debian13`. With no copy there is no pair to
+get wrong — but the moment a Dockerfile here adds a `COPY --from=build /lib/…` line it is back, and
+one command settles it: `docker run --rm <build-image> ldd --version | head -1`. The static image
+above is exactly such a case, and it cannot avoid it.

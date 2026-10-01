@@ -344,23 +344,8 @@ default for every feature. [examples/network-and-session.md](examples/network-an
   graph test; if the project already does that, add those view models to the test by hand.
 - A use case shared by two screens is registered in its domain module, not in one screen's.
 - A view model with route parameters takes them as a `Params` data class through
-  `parametersOf`, not as loose primitives:
-
-  ```kotlin
-  class AccountDetailsParams(val accountId: Long)
-  val accountsUiModule = module { viewModel { (params: AccountDetailsParams) -> AccountDetailsViewModel(params, get(), get()) } }
-
-  // the nav-host entry hands the typed route to the Screen; the Screen builds Params
-  composable<AccountRoute> { entry -> AccountDetailsScreen(AccountDetailsParams(entry.toRoute<AccountRoute>().id), onBack = { navController.popBackStack() }) }
-
-  @Composable
-  fun AccountDetailsScreen(params: AccountDetailsParams, onBack: () -> Unit,
-      viewModel: AccountDetailsViewModel = koinViewModel(parameters = { parametersOf(params) })) { /* … */ }
-  ```
-
-  The alternative is `SavedStateHandle.toRoute<AccountRoute>()` inside the view model, with
-  `viewModelOf(::X)` resolving the handle; a test then constructs the view model with
-  `SavedStateHandle(mapOf(...))` or, simpler, with the `Params` directly.
+  `parametersOf`, not as loose primitives — the module, the nav entry and the Screen in
+  [examples/navigation.md](examples/navigation.md#route-parameters-into-a-view-model).
 
 ## Compose pitfalls already paid for
 

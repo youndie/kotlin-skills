@@ -37,6 +37,48 @@ under a deliberately small limit must be killed, otherwise the harness cannot de
 all). Details and the upstream address:
 [KT-89365](https://youtrack.jetbrains.com/issue/KT-89365).
 
+**The third arm: the system allocator survives a tighter limit, and costs a fifth of request
+CPU.** `-Xallocator=std` is deprecated, and the compiler's warning names its replacement:
+`-Xbinary=pagedAllocator=false`. That is a *named replacement*, not a demonstrated identity — the
+one service that measured both found them close and **not identical**. Ship the replacement's
+spelling (the deprecated flag breaks on a Kotlin upgrade), and measure it rather than inherit the
+deprecated flag's numbers. Under a hard 64 MiB limit this family is the only arm measured to
+survive, on [xyk](https://github.com/youndie/xyk/blob/471cb39/server/build.gradle.kts) — a
+service that writes to SQLite on every request:
+
+| 64 MiB limit, interleaved rounds | survived | peak | ingest |
+|---|---|---|---|
+| `fixedBlockPageSize=16` | **1 / 10**, the survivor above the limit | — | 437 rps |
+| `-Xallocator=std` | **10 / 10** | 54.9–65.7 MB | 379 rps |
+| `-Xallocator=std`, re-run beside the replacement | 5 / 5 | 56 760–65 348 kB, 57–81 threads | — |
+| `-Xbinary=pagedAllocator=false` | 5 / 5 | 60 904–**65 852** kB, 85–121 threads | — |
+
+The limit is 65 536 kB, so the replacement's top peak is **above** it: the criterion is met by
+reclaim rather than by headroom, which is how xyk itself words it. Read "survives" here as "was not
+killed in thirty-second rounds", not as "fits".
+
+Its price on the CPU axis was measured later on the same service by a study looking for something
+else ([pgo-native-spike](https://github.com/youndie/pgo-native-spike/blob/7bd8918/docs/research/2026-09-20-instrumentation-pgo.md),
+"The ceiling was measured on a binary that opts out of the fast allocator"):
+
+| | µs CPU per request |
+|---|---:|
+| `pagedAllocator=false` | 8 175 |
+| `pagedAllocator=true` — the default | 6 756 |
+| paired, eight counted rounds | **+19.01 %**, 95 % CI ±2.33 % |
+
+Four consequences. **sborka's convention does not offer this arm** — `allocatorPageSize` tunes the
+paged allocator, it does not turn it off — so a service whose limit only this arm survives sets
+`freeCompilerArgs += "-Xbinary=pagedAllocator=false"` itself, with the measurement beside the line,
+and keeps the other arms selectable by a property so the choice can be re-run rather than re-argued
+(xyk's `-Pxyk.allocator=`). **It is the memory criterion's price, not a free setting**: a service
+with headroom under its limit gives back a fifth of its CPU for nothing. **The SQLite warning above
+is katcher's, not SQLite's**: xyk also has SQLite on the request path, and there the system
+allocator was the arm that lived — the shape of the load decided, which is the point of measuring.
+And **the `MALLOC_ARENA_MAX=2` hazard below was measured on `-Xallocator=std` only**; nobody has
+measured it on `pagedAllocator=false`, so an image that ships both measures the pair, with the
+positive control.
+
 **The counter-case: a heap of gigabytes on a few threads wants 256 KiB, and pays for 16 in pause.**
 Everything above is a service with many threads and a heap of tens of megabytes, where the pages
 held per thread *are* the resident set. Turn the shape around and the same option costs something

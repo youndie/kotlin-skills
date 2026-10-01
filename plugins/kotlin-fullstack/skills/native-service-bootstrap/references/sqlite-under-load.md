@@ -68,3 +68,12 @@ a participant that throws is recorded as a failure while its stage still reports
 checkpoint that quietly stopped working passes every order check there is. Mount a volume in the
 shutdown check and require the `-wal` to be gone: there, 107 152 bytes at `SIGTERM`, absent
 afterwards, with the database grown by exactly its contents.
+
+## Pragmas sent through a pool reach one connection
+
+`db.execute("PRAGMA ...")` runs on whichever
+connection the pool handed out. Only `journal_mode` survives that (it is written into the file
+header); `foreign_keys` is saved by sqlx enabling it itself in `after_connect`; but
+`synchronous = NORMAL` stays on exactly one connection out of N, and the rest commit with a full
+fsync. It is settled by a probe: N concurrent transactions, each running `PRAGMA synchronous;`. The
+URL does not fix it — sqlx only knows `mode`, `cache`, `immutable`, `vfs`.
