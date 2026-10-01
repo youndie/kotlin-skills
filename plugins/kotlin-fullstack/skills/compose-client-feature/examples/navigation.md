@@ -127,3 +127,24 @@ fun graphIsBuiltOnce() = runComposeUiTest {
     assertEquals(1, builds, "the graph was rebuilt — navigation will reset to the start destination")
 }
 ```
+
+## Route parameters into a view model
+
+Referenced from the Koin wiring section of [SKILL.md](../SKILL.md). A `Params` data class through
+`parametersOf`, not loose primitives:
+
+```kotlin
+class AccountDetailsParams(val accountId: Long)
+val accountsUiModule = module { viewModel { (params: AccountDetailsParams) -> AccountDetailsViewModel(params, get(), get()) } }
+
+// the nav-host entry hands the typed route to the Screen; the Screen builds Params
+composable<AccountRoute> { entry -> AccountDetailsScreen(AccountDetailsParams(entry.toRoute<AccountRoute>().id), onBack = { navController.popBackStack() }) }
+
+@Composable
+fun AccountDetailsScreen(params: AccountDetailsParams, onBack: () -> Unit,
+    viewModel: AccountDetailsViewModel = koinViewModel(parameters = { parametersOf(params) })) { /* … */ }
+```
+
+The alternative is `SavedStateHandle.toRoute<AccountRoute>()` inside the view model, with
+`viewModelOf(::X)` resolving the handle; a test then constructs the view model with
+`SavedStateHandle(mapOf(...))` or, simpler, with the `Params` directly.
