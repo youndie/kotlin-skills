@@ -23,6 +23,10 @@ jobs:
       # First, because a checker that cannot be shown to fire would make everything after it green.
       - run: python3 scripts/check_plugin.py --selftest
 
+      # The one mechanism a skill ships as code. Its control proves every freeze rule can fail; nothing else
+      # in this repository runs it.
+      - run: python3 plugins/research-method/skills/measurement-study/scripts/brief_freeze.py --control
+
       - if: github.event_name == 'pull_request'
         run: python3 scripts/check_plugin.py --base "origin/${{ github.base_ref }}"
 

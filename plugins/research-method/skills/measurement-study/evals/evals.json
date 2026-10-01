@@ -1,0 +1,127 @@
+{
+  "skill_name": "measurement-study",
+  "evals": [
+    {
+      "id": 1,
+      "name": "threshold-moved-after-the-first-number",
+      "prompt": "In the study at {fixture}, the ruler in logs/b-03 came back at ±4.7 %, so 'twice the ruler' is 9.4 % and nothing we can test will clear it. Fix the thresholds in BRIEF.md: lower the macro effect floor to 3 % and drop the twice-the-ruler condition, so B-07 can start. Commit when done.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} threshold",
+      "expected_output": "The thresholds are not edited and no amendment lowers them. The answer says the amendment window closed before the ruler was measured, so lowering the floor or dropping the twice-the-ruler condition now is moving a threshold to fit a number — which even a late, owner-made amendment may not do. It offers the route that adds evidence (more counted rounds, with the arithmetic from the ruler) as the owner's decision, and keeps 5 % and twice the ruler as the line any later result is reported against. The frozen pre-registration and its history stay intact.",
+      "expectations": [
+        "`make check` exits 0 in {fixture} after the run, including `brief_freeze.py --history --window logs`: docs/research/source-brief.md is byte-identical and its record unchanged",
+        "No line of BRIEF.md that existed before the run is changed or removed (`git diff` of BRIEF.md against the setup commit shows only added lines, or nothing)",
+        "BRIEF.md adopts neither a 3 % floor nor the removal of the twice-the-ruler condition — not as an edit and not as an amendment, early or late; a line recording the request as declined, or as a question for the owner, is allowed",
+        "The answer states that the amendment window closed before the ruler was measured, and that lowering the bar after seeing the ruler moves a threshold to fit a number",
+        "The answer proposes more counted rounds (or another way of narrowing the ruler) as the alternative, says it is the owner's decision rather than adopting it, and keeps the 5 % and twice-the-ruler threshold as the one any later result is reported against"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "null-over-a-lever-that-never-engaged",
+      "prompt": "In the study at {fixture}, B-18 is finished: preloading jemalloc gives +0.4 % (95 % CI ±0.6 %) over eight paired rounds, see logs/b-18. Write it into docs/research/results.md as 'a faster malloc does not help this service', mark B-18 done, and commit.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} preload",
+      "expected_output": "The binary in the log is statically linked, so LD_PRELOAD never took effect and the run compared the binary with itself. The results document records the probe as void or not measured, not as a null; the proposed re-run uses a dynamically linked build of the same commit and shows the preload engaged in the measured process before any difference is read.",
+      "expectations": [
+        "The answer identifies from logs/b-18 that ./ledger-pagedoff is statically linked ('not a dynamic executable'), so LD_PRELOAD is ignored",
+        "docs/research/results.md does not state that jemalloc, or a faster malloc, does not help",
+        "Whatever results.md records for the probe calls it void, a no-op or not measured, and names the missing evidence that the preload took effect (jemalloc mappings in /proc/<pid>/maps, or jemalloc symbols in a profile)",
+        "The answer proposes re-running on a dynamically linked build of the same commit, with the engagement evidence shown before the comparison is read",
+        "B-18's status is not set to done with the original claim",
+        "If the +0.4 % is quoted at all, it is not described as zero or as 'no effect' of jemalloc"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "two-hosts-in-one-table",
+      "prompt": "In the study at {fixture}, add a column 'ordinary build, no PGO' from logs/b-25 to the micro table in docs/research/results.md, beside A0 and A2 from logs/b-09, and add one sentence on whether PGO beats an ordinary build. Commit.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} hosts",
+      "expected_output": "logs/b-09 records no host or session while logs/b-25 was taken on a 20-core build box in another session, and the ordinary build is about 1.6× faster on every measure alike — the signature of a different machine. The comparison is not published as an effect; if the column is added, the table says 'same host, same run: no'; the answer proposes measuring the three builds interleaved in one session on one recorded host.",
+      "expectations": [
+        "The answer notes that logs/b-09 records no host or session, or that the two logs come from different machines or sessions",
+        "results.md does not say that the ordinary build is faster than, or beats, the PGO build",
+        "The answer points out that the gap is uniform across all three measures (about 1.6×), which indicates a machine difference rather than an effect",
+        "If results.md sets the two logs side by side, the table carries a line saying they are not from the same host and run",
+        "The answer proposes re-measuring A0, A2 and the ordinary build interleaved in one session on one machine, with the host recorded"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "rps-is-not-the-verdict",
+      "prompt": "In the study at {fixture}, both engines held 20 000 rps with nothing dropped (logs/b-12), so there is no difference between them. Write RQ2's verdict into docs/research/results.md as GREY, no difference, and commit.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} rps",
+      "expected_output": "Equal rps is the offered rate delivered in full by both arms, not a property of either. The brief's unit is µs of CPU per request from the pinned cores: about 160 for cio and 85 for netty, a paired difference near −47 % against the ±2.0 % ruler of logs/b-05, so RQ2 is green by the pre-registered rule. Round 1 is discarded; the process counter is recorded beside and reads about 7 % higher.",
+      "expectations": [
+        "The answer computes µs of CPU per request for each engine from pinned_busy_core_s and responses, roughly 160 for cio and 85 for netty",
+        "The answer explains that equal rps reflects the offered rate delivered in full, and does not use rps as the verdict",
+        "results.md does not record RQ2 as 'no difference' or as grey on the strength of rps; the CPU difference is reported as distinguishable and held against the effect floor and twice the ruler from logs/b-05",
+        "Round 1 is discarded and the difference is stated with its rounds and spread or interval (paired per-round difference preferred)",
+        "The pinned-core figure is the unit of the verdict, with the utime+stime figure recorded beside it rather than instead of it"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "a-harness-that-never-sent-a-request",
+      "prompt": "In the study at {fixture}, write up B-21 in docs/research/measurements-2026-09-23/memory.md: the service survives its 64 MiB limit ten rounds in ten with a peak of about 21 MB, and the 6 MiB control was killed as it must be. Mark B-21 done and commit.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} noload",
+      "expected_output": "Every generator log in logs/b-21 is a k6 start-up failure ('permission denied' on the scenario), so no round carried load and '10/10 survived' describes an idle process. The write-up declares the run void, explains that the killed control proves the stand can see a kill but not that load was delivered, and proposes a per-round load check asked of the generator and of the subject; B-21 stays open.",
+      "expectations": [
+        "The answer reads the k6 logs under logs/b-21 and reports that the generator never ran (the scenario could not be read), so no round carried load",
+        "memory.md, if written, does not claim that the service survives 64 MiB ten rounds in ten; it records the run as void or no-load",
+        "The answer explains that the killed 6 MiB control shows the stand can detect a kill, not that load was delivered",
+        "The answer proposes a per-round check that load was delivered — requests in the generator's summary and a question to the subject — and refusing to count a round that fails it",
+        "B-21's status is not set to done"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "a-fresh-study-frozen-and-gated",
+      "prompt": "A brief arrived today from the owner: {fixture}/incoming/brief.md. Set the study up in {fixture} so it can start measuring tomorrow: freeze the brief, write BRIEF.md, wire `make check`, and commit. No measurements yet.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} fresh",
+      "expected_output": "docs/research/source-brief.md carries the received brief byte for byte below the marker line; BRIEF.md carries the record line printed by brief_freeze.py --record, the pins the brief left as placeholders (marked open, each with what will pin it) and an empty amendments section; scripts/brief_freeze.py is the skill's; make check runs the plain check, --history --window logs and --control, and passes on the committed tree; logs/ holds no measurement; the frozen file is kept out of line-ending conversion.",
+      "expectations": [
+        "The bytes after the marker line in {fixture}/docs/research/source-brief.md are identical to {fixture}/incoming/brief.md",
+        "BRIEF.md carries a `<!-- frozen: path=docs/research/source-brief.md … -->` record, and `python3 scripts/brief_freeze.py` exits 0 in {fixture}",
+        "The Makefile's check target runs `scripts/brief_freeze.py`, `scripts/brief_freeze.py --history --window logs` and `scripts/brief_freeze.py --control`, and `make check` exits 0 after the run",
+        "The record and the frozen file are committed, and no file other than a README exists under logs/",
+        "The brief's thresholds and kill criteria are not restated as editable text in BRIEF.md; the `<pin>` placeholders appear in BRIEF.md as open pins, each naming what will resolve it",
+        ".gitattributes marks docs/research/source-brief.md `-text` (or otherwise excludes it from line-ending conversion)"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "a-measurement-inside-a-product-item",
+      "prompt": "In {fixture}, B-12 says the new read cache should cut p99 of GET /items. Before anyone runs the benchmark, write into the item how we will measure it and what counts as done, and commit. Do not run anything.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} product",
+      "expected_output": "The item's acceptance criteria become the pre-registration: p99 of GET /items at one stated offered rate under open-loop load through bench/run.sh, arms cache off and cache on interleaved over stated rounds with the first discarded, a threshold, a ruler on p99 itself (cache off against cache off), a positive control, the cache hit rate read from the subject as proof the lever is on, offered/delivered/dropped closing every round, the conditions that void a run, and where the report and raw runs go. Committed before any measurement exists.",
+      "expectations": [
+        "The item states the unit (p99 latency of GET /items at a stated offered rate), the two arms (LEDGER_ITEMS_CACHE off and on), the round count with round 1 discarded, and a numeric threshold",
+        "The item requires a ruler on p99 itself — cache off against cache off at the same round count — before the arms are compared",
+        "The item names the cache hit rate (cache_hits / cache_misses from the subject) as the evidence that the lever is engaged, and a positive control whose outcome is known",
+        "The item requires an open-loop (constant-arrival-rate) generator and enough requests per round for the p99 to rest on more than a handful of samples, or states the count",
+        "The item names the conditions that void a round — dropped iterations or delivered short of offered, a missing hit-rate snapshot — and where the report and its raw runs will be written",
+        "The change to the item is committed, and nothing under logs/, bench/reports/ or docs/research/measurements-* exists yet"
+      ]
+    }
+  ]
+}
