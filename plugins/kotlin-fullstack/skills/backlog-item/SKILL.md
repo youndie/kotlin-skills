@@ -1,6 +1,6 @@
 ---
 name: backlog-item
-description: "Take exactly one item from a docs-bootstrap backlog in its file-per-item form (docs/backlog/B-NN-*.md, the generated index in backlog.md) and carry it to a pull request: pick the next unblocked item by priority, read the feature, screen and endpoint documents as the assignment, branch, implement with the matching skill (contract, server, client screen with design parity, tests), keep the documentation and the item's status in the same change, verify through the real path, open the PR, stop. Built to run under /loop, one item per iteration. Use for 'next item', 'work the backlog', 'take B-12', 'run the loop', 'what is next', or whenever a repository has a backlog and the task is to advance it."
+description: "Take exactly one item from a docs-bootstrap backlog in its file-per-item form (docs/backlog/B-NN-*.md, the generated index in backlog.md) and carry it to a pull request: pick the next unblocked item by priority, read the feature, screen and endpoint documents as the assignment, branch, implement with the matching skill (contract, server, client screen with design parity, tests), keep the documentation and the item's status in the same change, verify through the real path, open the PR, merge it on a green head commit only where the loop is told to, stop. Built to run under /loop, one item per iteration. Use for 'next item', 'work the backlog', 'take B-12', 'run the loop', 'what is next', or whenever a repository has a backlog and the task is to advance it."
 ---
 
 # One backlog item, start to pull request
@@ -17,13 +17,16 @@ does that past a few dozen items; below that, a person works the checklist), or 
 nothing to pick and ends.
 
 ```
-backlog.md ──► pick (priority, unblocked) ──► the documents = the assignment
+backlog.md ──► pick (priority, unblocked) ──► branch + `wip` commit, pushed
       ▲                                              │
-      │                                    branch, implement with the matching skill,
+      │                                    the documents = the assignment;
+      │                                    implement with the matching skill,
       │                                    docs + item status in the same change
       │                                              │
-      └──── item done / wip / question ◄──── verify through the real path ──► PR ──► stop
+      └──── item done / wip / question ◄──── verify through the real path ──► PR ──► merge* ──► stop
 ```
+
+\* only where the loop has been told it merges, and only on a verdict over the head commit (Step 7).
 
 Boundaries: the backlog format is `docs-bootstrap` (items are files, the index is generated);
 the work itself is the other skills of this plugin, chosen by the item's shape; this skill owns
@@ -41,7 +44,7 @@ picking, scoping, and closing.
    pull request for it, then stop. Never fix it on the default branch, never build an item on
    top of it, and never rewrite a hand-written document to make a checker pass.
 4. List the loop's open work: `gh pr list --state open` and `git branch -r --list
-   'origin/feat/b-*'`. Statuses on the default branch change only when a pull request merges,
+   'origin/feat/b-*' 'origin/fix/b-*'`. Statuses on the default branch change only when a pull request merges,
    so an item's real state is the item file **plus** whether a branch or pull request for it
    exists. That list is what Step 1 reads.
 
@@ -50,7 +53,7 @@ picking, scoping, and closing.
 An id given by the user wins. Otherwise, in this order:
 
 1. **An item with an open pull request is waiting for review, not pickable.** Its branch is
-   `feat/b-<nn>-*` (the mapping is the name); if a merge on the default branch has since made
+   `feat/b-<nn>-*` or `fix/b-<nn>-*` (the mapping is the name); if a merge on the default branch has since made
    that pull request conflict on `backlog.md`, rebase it and regenerate the index first — a
    pull request that cannot merge runs no checks at all — then move on.
 2. **Resume** an item whose branch exists with no pull request — a previous iteration stopped
@@ -74,7 +77,31 @@ the item's own branch off the feature branch.
 
 Say which item was picked and why, in one line, before doing anything else.
 
-## Step 2. The documents are the assignment
+## Step 2. Branch, before reading a line of code
+
+The branch is the first thing that changes after the pick — before the documents, before the
+code. Twice an iteration went from Step 0 (which ends on the default branch) straight into the
+work and committed there; once the push published two commits on `main` with no pull request,
+and once only an explicit refspec kept them off it. A step that comes after reading is a step
+that gets skipped once the reading turns into writing.
+
+- Branch from the default branch: `feat/b-<nn>-<slug>` (`fix/b-<nn>-<slug>` when the item
+  describes a defect), unless the repository's workflow prescribes the docs-first shape
+  `feature/<feature-kebab>` — then that name, identical across repositories.
+- First commit, pushed: the item's status `open → wip`, index regenerated. Work outside git
+  is invisible; an iteration that dies before its first commit leaves the next one guessing.
+  The index is regenerated on the branch on purpose, so the pull request passes the gate; the
+  cost is a conflict in `backlog.md` whenever another loop pull request merges first, and
+  Step 1.1 pays it.
+- **Before every push**, `git branch --show-current` names the item's branch. If it names the
+  default branch, the commits move before anything is pushed — `git switch -c <the item's
+  branch>`, then `git branch -f <default> origin/<default>` — and only then `git push -u origin
+  <the item's branch>`. Never a bare `git push` or `git push origin HEAD`, which from the default
+  branch publishes the work unreviewed; and no `-u` together with a `HEAD:<branch>` refspec,
+  which points the default branch's upstream at the item's branch and makes the next
+  iteration's `git pull` read from it.
+
+## Step 3. The documents are the assignment
 
 Read, in this order, following the ids in the frontmatter:
 
@@ -98,17 +125,6 @@ a new item (`B-<next free>`, from the template, `blocked_by` if it truly blocks)
 the item's findings; a fix folded in unasked is what makes a pull request unreviewable. The
 one exception is a change without which the item cannot be verified at all, and then the PR
 description says so.
-
-## Step 3. Branch, and leave a trace at once
-
-- Branch from the default branch: `feat/b-<nn>-<slug>` (`fix/b-<nn>-<slug>` when the item
-  describes a defect), unless the repository's workflow prescribes the docs-first shape
-  `feature/<feature-kebab>` — then that name, identical across repositories.
-- First commit, pushed: the item's status `open → wip`, index regenerated. Work outside git
-  is invisible; an iteration that dies before its first commit leaves the next one guessing.
-  The index is regenerated on the branch on purpose, so the pull request passes the gate; the
-  cost is a conflict in `backlog.md` whenever another loop pull request merges first, and
-  Step 1.1 pays it.
 
 ## Step 4. Do the work with the skill the item's shape calls for
 
@@ -144,8 +160,8 @@ disagree.
 
 Where the docs-first process applies (a `research/feature-<kebab>.md` in the branch), it is
 read first, updated with findings as they appear, and **deleted in the pull request's last
-commit, before the pull request is opened** — this skill does not merge, so "before merge" is
-now.
+commit, before the pull request is opened** — a merge, where there is one, is Step 7's
+verdict and not a moment to edit in, so "before merge" is now.
 
 ## Step 5. Verify through the real path
 
@@ -173,7 +189,7 @@ iteration resumes at Step 1.2 and reads those entries. Three such entries on one
 a scenario moving from open to ticked make it a `question`, not a fourth attempt — the count
 is in the file, not in anyone's memory.
 
-## Step 6. Close the item, open the pull request, stop
+## Step 6. Close the item, open the pull request
 
 1. Item status → `done` (or `question`, with the question written as the last section of the
    item: what was found, what the choices are, who decides). A refuted hypothesis or a decision
@@ -181,18 +197,79 @@ is in the file, not in anyone's memory.
    or `backlog.md`'s decisions — not only into the item.
 2. Rebase on the default branch and regenerate the index; `make check` green;
    `python3 scripts/backlog_index.py --against origin/<default>` clean (a number taken by a
-   branch that merged meanwhile is exactly what it catches, and Step 2 may have added an
+   branch that merged meanwhile is exactly what it catches, and Step 3 may have added an
    item); `python3 scripts/code_anchors.py --repos ..` reports every anchor in the item and
    the touched documents as found — it is a report, not part of the gate, so read it.
 3. Commit — Conventional Commits, English, the item id as a footer (`Refs: B-12`), no tool
    signatures — push, and open the pull request. Its body is the item's acceptance criteria and
    the feature's scenarios as a ticked checklist, the parity summary for a screen, where the
-   suites ran, and what was deliberately left out. Do **not** merge unless the repository's
-   instructions say the loop merges; until it merges, the item is waiting for review (Step
-   1.1) and its status on the default branch still reads `open` — that is expected.
-4. Report in a few lines: the item, the PR link, what moved in the documents, the next
-   pickable item (or that none is), and any `question` items waiting for a person.
-5. Stop. The loop decides whether there is a next iteration; this skill never picks a second
+   suites ran, and what was deliberately left out. Until it merges, the item is waiting for
+   review (Step 1.1) and its status on the default branch still reads `open` — that is expected.
+
+## Step 7. Merge — only where the loop has been told it merges
+
+The default is that the loop does not merge. Where the repository's instructions say it does
+(or the person said so when the loop started), it merges its own pull request on green — and
+loops that run unattended tend to end up there, because items chain through `blocked_by` and an
+unmerged blocker stops everything behind it. Consent is a fact written down, not an inference:
+if neither the instructions nor the conversation say, **ask once when the loop starts**, not at
+the first green pull request; an automatic permission check will refuse `gh pr merge` anyway
+until the consent is in the conversation. Consent to merge is not consent to deploy to
+production — that is a separate yes, per step.
+
+**"The checks finished" is not "the checks passed".** A wait for nothing to be pending ends on a
+red run just as well, and a red build was merged exactly that way; a second one went in because
+the verdict was a `grep -qv` over the check output, which on a Mac with ugrep answers the wrong
+way. Wait, then decide in `jq`, over **every** check run on the **head commit**:
+
+```bash
+pr=<n>; req='["check","suite"]'          # checks that must have run and passed, by name
+read -r sha base <<<"$(gh pr view "$pr" --json headRefOid,baseRefName --jq '"\(.headRefOid) \(.baseRefName)"')"
+runs() { gh api "repos/{owner}/{repo}/commits/$sha/check-runs?per_page=100"; }
+q='def latest: .check_runs | group_by(.name) | map(max_by(.started_at));'
+for _ in $(seq 60); do                   # thirty minutes; past that it is a finding, not a wait
+  runs | jq -e --argjson req "$req" "$q"' latest | (($req - map(.name)) | length) == 0 and all(.[]; .status == "completed")' >/dev/null && break
+  sleep 30
+done
+verdict=$(runs | jq -r --argjson req "$req" "$q"'
+  latest as $l | ($req - ($l | map(.name))) as $missing
+  | [$l[] | select(.conclusion as $c | ["success", "skipped", "neutral"] | index($c) | not)] as $bad
+  | [$l[] | select(.name as $n | $req | index($n)) | select(.conclusion != "success")] as $soft
+  | if ($req | length) == 0 then "refused: no required check named"
+    elif ($missing | length) > 0 then "refused: never ran \($missing)"
+    elif ($bad + $soft | length) > 0 then "refused: \($bad + $soft | unique_by(.name) | map("\(.name)=\(.conclusion // .status)") | join(", "))"
+    else "green" end')
+behind=$(gh api "repos/{owner}/{repo}/compare/$base...$sha" --jq .behind_by)
+echo "$verdict; behind $base by $behind"
+[ "$verdict" = green ] && [ "$behind" = 0 ] && gh pr merge "$pr" --squash --match-head-commit "$sha"
+```
+
+Any run that failed refuses, named in `req` or not: in an unprotected repository nobody else
+decides which checks count, and a `req` written narrowly would otherwise wave a red `build`
+through. `req` adds what must have **run** — a check that never started is not a pass — and an
+empty or misspelled `req` refuses for the same reason. `skipped` and `neutral` pass on the
+checks nobody required, as on GitHub. Tried on the two pull requests merged red: both refused,
+whatever `req` was; their green neighbours pass. And around it:
+
+- **A pull request with a conflict runs no checks at all** — `mergeable: CONFLICTING` means there
+  is nothing to wait for. Rebase, regenerate the index, push, and wait again.
+- **Green on an old base is not green**, which is what `behind` is for: when the default branch
+  has moved since the head was cut, rebase and let the checks run on what will actually merge.
+- **The waiter only reads.** A background job that switches branches is a second pair of hands in
+  the same working tree; the next commit lands wherever it left `HEAD`.
+- **Red is a finding, never a reason to loosen.** Fix it on the branch inside the item's scope,
+  or record it as a new item; no `--admin`, no skipped check.
+- Under the docs-first shape, where the documentation lives in a repository of its own, the item
+  has a pull request in each: the code one merges first, then the documentation one that closes
+  the item, each on its own green. Whether the branch is deleted afterwards
+  is the repository's convention, not this skill's.
+
+## Step 8. Report, and stop
+
+1. Report in a few lines: the item, the PR link (merged or waiting), what moved in the
+   documents, the next pickable item (or that none is), and any `question` items waiting for a
+   person.
+2. Stop. The loop decides whether there is a next iteration; this skill never picks a second
    item in the same run.
 
 ## What not to do
@@ -209,3 +286,5 @@ is in the file, not in anyone's memory.
   stop.
 - **Do not leave the tree dirty or the item's status stale at the end of an iteration.** Both
   are read by the next iteration as facts.
+- **Do not commit on the default branch, and do not merge on "finished".** The branch comes
+  before the code (Step 2); a merge comes after a verdict on the head commit (Step 7).
