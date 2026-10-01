@@ -191,4 +191,13 @@ metric on the same machine measured 12 810 ms in one campaign and 8246 ms in ano
 first interleaved two-minute release links between its samples. Re-measure the baseline inside
 every campaign rather than comparing against a number from an earlier one.
 
+### The Gradle daemon you are measuring
 
+Three things a build-time experiment gets wrong before it measures anything, moved here from the
+gotcha table in [SKILL.md](../SKILL.md):
+
+| Gotcha | Symptom | What to do |
+|---|---|---|
+| **A repository's `org.gradle.jvmargs` may not be in effect at all** (build-time study) | the daemon runs a heap nobody in the project declared; an experiment that edits this value measures an absent variant and reports a clean "no effect" | `~/.gradle/gradle.properties` on the machine wins. Read the running daemon — `pgrep -af GradleDaemon \| grep -oE '\-Xmx[0-9]+[a-zA-Z]'` — before believing the file. Same repository, two machines, opposite answers: one had a home file with `-Xmx5g`, the other none and the project's `-Xmx4G` ran |
+| **There is one JVM during a native link, not two** (build-time study) | `kotlin.daemon.jvmargs` is attached to a process that does not exist while linking; `kotlin.native.jvmArgs` has no JVM to size | a census of `java` processes 45 s into a release link shows Gradle daemons and nothing else — the Kotlin/Native compile runs **inside** the Gradle daemon. Tune `org.gradle.jvmargs`, and remember LLVM allocates outside that heap anyway |
+| **Two Gradle daemons where you assumed one** | measurements drift for no visible reason; on a small box the release link is OOM-killed | daemons that differ in JVM args or JDK do not reuse each other. `pgrep -c -f GradleDaemon` before a campaign; a stray one from an earlier JDK holds gigabytes |

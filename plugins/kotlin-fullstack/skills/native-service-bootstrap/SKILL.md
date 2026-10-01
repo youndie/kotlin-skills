@@ -11,32 +11,13 @@ runs is [`ktor-server-feature`](../ktor-server-feature/SKILL.md). Tests are
 [`product-brief`](../product-brief/SKILL.md), which writes for
 [docs-bootstrap](https://github.com/youndie/docs-bootstrap).
 
-The material comes from two services taken to production:
-[katcher](https://github.com/youndie/katcher) and [metrik](https://github.com/youndie/metrik). Steps 1, 6, 7
-and 8 were extended on 2026-09-14 from tracy M-137 (the SQLite pool, WAL truncation,
-`MALLOC_ARENA_MAX`, the shape of a measurement) and rewritten on 2026-09-14 from the katcher 0.8.0
-release — three recipes there (kore, `fixedBlockPageSize`, `FROM scratch`) were taken all the way to
-a deploy and measured; their numbers are recorded, not estimated. On 2026-09-15 the mechanisms left:
-whatever a Gradle convention or a library can enforce is no longer spelled out here — the allocator
-page size, `--as-needed`, the staged binary path and the reference image are `sborka.native-service`
-and `sborka.kmp`, ordered shutdown and probes are `kore`, and the static-link recipe is sborka's
-research. **This file describes and measures; the convention compels.** Where the two disagree, the
-convention is right and the paragraph is stale — which is the whole reason for the split: the next
-change to the static recipe ([KT-89362](https://youtrack.jetbrains.com/issue/KT-89362) removes two
-of its five property overrides) must not leave an agent applying the old one out of here. The **Build time** section was
-added on 2026-09-15 from the katcher build-time study (`docs/research/build-time/` in that
-repository): nine questions with their thresholds declared **before** each measurement, three
-results that work and still missed their line, one red, and one setting validated on a second
-repository. Step 1's `MALLOC_ARENA_MAX`
-paragraph gained its counter-example on 2026-09-15, from the Ktor-under-a-container-limit study —
-the first measurement here where a recipe from this file made a service **worse**, and the reason the
-paragraph now ends in a rule rather than a number. **Step 0 changed on 2026-09-16**: it said "copy
-metrik or katcher" and now says "clone [keel](https://github.com/youndie/keel)", because a template
-without a domain arrived — and the first service built from it needed no change to any of its
-infrastructure files, which is the claim that made the swap worth making rather than the existence of
-the repository. Most of the value here is not the templates but the
-**"Gotchas already paid for" section**: each of those cost between a day and several months of silent
-breakage in production.
+The material comes from services taken to production — [katcher](https://github.com/youndie/katcher),
+[metrik](https://github.com/youndie/metrik), tracy — and every number was measured on a running
+service, not estimated.
+Whatever a Gradle convention or a library can enforce lives there — `sborka.native-service`,
+`sborka.kmp`, `kore` — and not here. **This file describes and measures; the convention compels**;
+where the two disagree, the convention is right and the paragraph is stale. Most of the value is the
+**"Gotchas already paid for" section**: each cost between a day and months of silent breakage.
 
 ## Step 0. Start from keel, not from the template in this file
 
@@ -53,52 +34,31 @@ against 178 lines of the service's own domain. No file under `Dockerfile`, `Make
 [keel](https://github.com/youndie/keel) is a template repository: two targets that both run, a store
 that works on both, an ordered shutdown, three probes, `/version`, an image, and a documentation tree
 that passes its own gate. **Clone to both halves answering `/health/ready` is 3 min 48 s** on a
-machine that has never seen the portfolio, of which the build — almost all of it the Kotlin/Native
-toolchain — is 82 %. Its image is 13 972 497 bytes.
-
-**This replaces "copy metrik or katcher", and the reason is what a copy costs.** Those two carry a
-domain, so copying one starts by deleting things you do not understand, and what you delete is
-decided by what you recognise. keel has one entity on purpose and its CI proves it still builds.
-
-They are still worth opening, for a different question: **the idioms there are newer**, and when one
-of them disagrees with keel, the living service is usually right and keel is usually behind. Copy
-*structure* from keel; copy *style* from metrik or katcher.
+machine that has never seen the portfolio, 82 % of it the build, nearly all of that the toolchain. It replaces
+"copy metrik or katcher" because those carry a domain, and copying one starts by deleting things you
+do not understand. They are still worth opening for a different question: their idioms are newer,
+and where one disagrees with keel the living service is usually right. Copy *structure* from keel;
+copy *style* from metrik or katcher.
 
 Check that the task really is a new service: if a `:server` module already exists and a route has to
 be added, that is `ktor-server-feature`, not this skill.
 
 ### What keel does not decide for you
 
-Two things it deliberately leaves open, because both are decisions a service makes about itself:
-
-* **outbound TLS.** keel makes no outbound calls, so it ships no HTTP client. `ktor-client-cio` is the
-  obvious one to reach for beside `ktor-server-cio` and **it has no TLS on Kotlin/Native** — it
-  compiles, links and resolves, and the first `https` request fails at runtime with `TLS sessions are
-  not supported on Native platform.` Outbound TLS means `ktor-client-curl`, which links libcurl and so
-  changes the runtime image and puts the service outside sborka's `scratch` recipe. Decide it when the
-  service is created, not when the first call fails;
-* **a chart.** keel ships none: a chart is a decision about a cluster, and step 9 is where it belongs.
+* **outbound TLS.** keel makes no outbound calls. `ktor-client-cio`, the obvious client beside
+  `ktor-server-cio`, **has no TLS on Kotlin/Native**: it compiles, links and resolves, and the first
+  `https` request fails at runtime. Outbound TLS means `ktor-client-curl`, which links libcurl — so it
+  changes the runtime image and leaves sborka's `scratch` recipe. Decide it when the service is
+  created, not when the first call fails;
+* **a chart.** keel ships none: a chart is a decision about a cluster, and step 8 is where it belongs.
 
 ## Where this skill ends
 
-**The moment `/health` answers from the image, the skeleton is done.** Everything after that —
-ingest, reads, search, background work — is features, and features are built by
-`ktor-server-feature`: layers, a repository behind an interface, UseCases, typed `@Resource`.
-
-This is not a formality but the place where the two skills came apart on a live project. In tracy,
-milestones M2–M6 were features, but they were done as a continuation of standing the service up —
-"we are still bringing up a new service". As a result the feature skill was never opened once,
-and the server shipped without layers: repositories exist, but as concrete classes, DI was never
-wired, `@Resource` is absent entirely, and the UseCase role is played by `ToolFacade`, which is not
-called one.
-
-The cost was not theoretical: the document `endpoint-query.md` promised a `cursor` parameter on
-`/api/logs` that the code did not have, and the divergence was found only during a document review
-several milestones later. A typed `@Resource` is a contract that **cannot** drift from the document
-silently.
-
-On a greenfield the boundary feels blurred, because the feature and the skeleton grow together. The
-rule is simple: **the second endpoint in a service is already a feature.**
+**The moment `/health` answers from the image, the skeleton is done.** Everything after it is
+features, built by `ktor-server-feature`. On a greenfield the two grow together, and that is where it
+failed: in tracy, milestones M2–M6 were done as "still bringing the service up", the feature skill was
+never opened, and the server shipped without DI, without `@Resource`, and with a documented `cursor`
+parameter the code did not have. The rule: **the second endpoint in a service is already a feature.**
 
 ## The order, and why this one
 
@@ -132,26 +92,30 @@ kotlin {
 
 **The executable itself is not configured here, and that is the point.** `sborka.native-service`
 owns `binaries.executable` — the entry point, the binary's name, a stable path to it, and the
-allocator page size that decides whether the service survives its container limit. Everything below
-in this step explains what it sets and how to find out whether its numbers are yours; none of it is
-a line to copy into a build file.
-
-`macosArm64` is there so tests run on the developer's machine; `linuxX64`/`linuxArm64` are what goes
-into the image. `jvm()` is not a luxury: it gives a fast test cycle for common code — but **there is
-only one real target, the native one**, and a green `jvmTest` proves nothing about production.
+allocator page size that decides whether the service survives its container limit. `macosArm64` is
+there so tests run on the developer's machine; `linuxX64`/`linuxArm64` are what goes into the image.
+`jvm()` gives a fast test cycle for common code — but **there is only one real target, the native
+one**, and a green `jvmTest` proves nothing about production.
 
 **`fixedBlockPageSize=16` is set by the convention, and `MALLOC_ARENA_MAX=2` rides in the reference
 image.** Two allocators sit under a Kotlin/Native service — the runtime's per-thread page cache and
 glibc's arenas — and on this platform resident memory follows the **thread count**, not the live
-heap. That is why a service dies at a limit its heap is nowhere near. **The exception is the
-opposite shape — a heap of gigabytes on a few threads:** there 16 KiB pages multiply the pages the
-collector walks and frees with the world stopped, the pause grows tenfold for 1 % of memory saved,
-and the service sets `nativeService { allocatorPageSize = 256 }` — as long as it allocates from few
-threads; with many, 256 KiB costs more than it saves and the choice is measured.
+heap. That is why a service dies at a limit its heap is nowhere near. Three shapes decide otherwise,
+each measured:
 
-What the numbers are, why the second one is dangerous to copy (with `-Xallocator=std` it multiplied
-peak RSS tenfold and OOM-killed three runs of ten), and how to measure your own service — including
-reading the peak from the cgroup rather than from `VmHWM` — is
+* **a heap of gigabytes on a few threads** — 16 KiB pages multiply the pages the collector walks with
+  the world stopped, the pause grows tenfold for 1 % of memory saved, and the service sets
+  `nativeService { allocatorPageSize = 256 }` (with many allocating threads 256 costs more than it
+  saves, and the choice is measured);
+* **a limit no paged arm survived** — on xyk at 64 MiB, `-Xallocator=std` lived ten rounds in ten
+  where 16 KiB pages lived once; its named replacement `-Xbinary=pagedAllocator=false` lived five in
+  five, peaking at the limit, and costs **+19 % CPU per request** (paired, ±2.3 %). The convention
+  does not offer it; a service that needs it sets it itself, with the measurement beside the line;
+* **`MALLOC_ARENA_MAX=2` with the system allocator** — with `-Xallocator=std` it multiplied peak RSS
+  tenfold and OOM-killed three runs of ten; on the replacement flag it has not been measured.
+
+The numbers, the two-sided page-size table, and how to measure your own service — including reading
+the peak from the cgroup rather than from `VmHWM` — are
 [references/memory-under-a-limit.md](references/memory-under-a-limit.md). Read it before changing
 either number; do not read it to decide whether to add a line, because the lines are already there.
 
@@ -161,60 +125,10 @@ limit), and `--print-config` prints it. The ceiling to act on it with is `GC.max
 `applyHeapCeiling()`, **not** `targetHeapBytes`, which autotune rewrites after a collection.
 Nothing sets it for you: the fraction is your measurement.
 
-#### What the convention enforces, so that this step is description and not instruction
-
-[sborka](https://github.com/youndie/sborka) carries `io.github.youndie.sborka.native-service` and
-`io.github.youndie.sborka.kmp`, and between them they hold every mechanism named in this step. The
-conventions are published as snapshots to a private Maven repository and resolve through
-`id("io.github.youndie.sborka.settings")`; katcher and metrik already apply it. An outside reader
-gets the same value from the reasoning below and from sborka's sources, which are public.
-
-That division is the point of this section. **The convention is where a setting is changed; this
-file is where it is explained.** A number written in both places drifts in one of them, and the one
-that keeps building is the one that is wrong — so when the two disagree, sborka is right and this
-paragraph is stale.
-
-What is enforced, rather than recommended:
-
-* **The allocator page size** — `binaryOption("fixedBlockPageSize", …)`, 16 KiB by default, right
-  for many threads and a small heap; `nativeService.allocatorPageSize` changes it — 256 for a heap
-  of gigabytes and few allocating threads, where the page count sets the collector's pause (not
-  with many: the reference has the table) — and `0` leaves the compiler's 128. A check on the stand reads the option
-  back **off the linked binary**, because the obvious version of that check reads `freeCompilerArgs`,
-  finds nothing, and goes red on a working build.
-* **`MALLOC_ARENA_MAX=2` in the reference Dockerfile**, pinned by a test, with the counter-example
-  beside it — so a service switching to `-Xallocator=std` meets the hazard where it is configured
-  rather than in a study it never read.
-* **`-Wl,--as-needed` on Linux executables** (in `sborka.kmp`: a property of linking on Linux, not of
-  being a service). Three `NEEDED` entries nothing calls, gone — and with them the
-  `COPY … libcrypt.so.1` line two Dockerfiles carried and the builder/runtime glibc pairing it
-  required. Linux only; `ld64` and `lld-link` reject the flag. Measured in
-  [research-static-binary](https://github.com/youndie/sborka/blob/main/docs/research/research-static-binary.md)
-  §1.3–1.4, taken as D1.
-* **`stageNativeImage`** (on `assemble`) puts the release binary at `build/native-image/<baseName>`,
-  so a `COPY` does not depend on whether the target was declared `linuxX64()` or `linuxX64("native")`
-  — both are live, and a Dockerfile moved between them fails at image build time naming the path and
-  not the difference.
-* **`<baseName>.needed.txt` and a line in the build log** — what the binary asks the loader for
-  (`readelf -d`). Deliberately not a gate: a new dependency must be visible in the log of the build
-  that introduced it, not in a container that failed to start.
-* **`writeNativeDockerfile`** writes the reference image **once** and refuses to overwrite: base
-  image, certificates and glibc are a decision that belongs in a file a person reads.
-* **A size budget** — `sborka.binaryBudget=50MiB`. The gate is a separate plugin the *repository*
-  applies; the property without it fails the build saying what to add, so a budget nothing measures
-  cannot sit there green.
-
-**What is deliberately not in it, with the reason:** the `FROM scratch` static recipe (§7 — sborka's
-D3 declines to hand out an option that pins five `konan.properties` keys JetBrains may change in a
-patch release) and any choice of targets (four repositories leave out four different targets for four
-different reasons, and one convention would delete four arguments rather than one duplication).
-
-**State as of 2026-09-15, so nobody looks for it in vain:** the convention's only consumer is the
-`stand/native-service` module inside sborka itself. Neither katcher nor metrik applies it: both
-declare `executable { entryPoint = … }` by hand and copy the `.kexe` out of `bin/…` in their
-Dockerfile. So **step 0 will hand you the hand-rolled form** — which is not an argument against the
-convention, but something to know while reading a living service as the model. Adopting it in a
-service that already ships is a migration of its own; standing a new one up is where it is free.
+What else the conventions enforce rather than recommend — `--as-needed`, `stageNativeImage`, the
+`needed.txt` report, `writeNativeDockerfile`, the size budget — what they deliberately leave out,
+and which living services still configure the executable by hand (katcher, metrik; keel applies
+the convention): [references/sborka-conventions.md](references/sborka-conventions.md).
 
 ### 2. `ServerConfig` through `expect/actual` — and dying on an empty required value
 
@@ -225,111 +139,76 @@ String)` with an `actual` in `jvmMain`/`nativeMain`. Required values are checked
 require(ingestKey.isNotBlank()) { "TRACY_INGEST_KEY is required" }
 ```
 
-**Failing on purpose is a feature.** An observability service or a data sink that quietly started
-without its key is indistinguishable from a healthy one until the first incident. The same principle
-applies to an agent living inside somebody else's process.
+**Failing on purpose is a feature**: a data sink that quietly started without its key looks healthy.
 
 ### 3. `/health` and the first link — proof of the toolchain
 
-Before any business logic: build the native binary and make sure it links, starts and answers. This
-is not running ahead; it is the only way to check that cross-compilation is configured, that Ktor
-CIO comes up on native and that the config is read. In metrik this landed in M0 beyond the plan and
-paid for itself immediately.
-
-The fact to check: `./gradlew :server:linkReleaseExecutableMacosArm64` → run the `.kexe` →
-`curl /health` → 200, and with a required variable missing the process dies.
+Before any business logic: build the native binary and make sure it links, starts and answers. It is
+the only way to check that cross-compilation is configured, that Ktor CIO comes up on native and that
+the config is read. The fact to check: `./gradlew :server:linkReleaseExecutableMacosArm64` → run the
+`.kexe` → `curl /health` → 200, and with a required variable missing the process dies.
 
 ### 4. The database and migrations — before the engine starts
 
 There is no migration framework. A list of SQL statements plus `PRAGMA user_version`, run inside
 `runBlocking { }` **before** `embeddedServer(...).start()`: a server that opened its port ahead of a
-ready schema would answer the first requests with errors.
-
-The database file and its directory are created by hand through okio (`FileSystem.SYSTEM`) — the
-volume in the cluster is mounted empty. The models are
+ready schema would answer the first requests with errors. The database file and its directory are
+created by hand through okio — the volume in the cluster is mounted empty. The models are
 `metrik/server/.../Application.kt:openDatabase` and `katcher/server/.../db/Migrate.kt`.
 
 **Do not call your own migration function `migrate()`.** sqlx4k's driver interface already has a
-member of that name, so an extension `suspend fun ISQLite.migrate()` is shadowed by it: `db.migrate()`
-compiles, runs the driver's own, creates nothing, throws nothing, and leaves `user_version` at 0. The
-service then starts on an empty schema and every route fails on a missing table — with no line
-anywhere pointing at the migration. Name it `migrateSchema()`. The general shape of the trap is worth
-more than the instance: **an extension function on a third-party interface is silently outranked by a
-member of the same name**, and the failure is a no-op rather than an error, so the check is to assert
-`PRAGMA user_version` after the call rather than to trust that it ran.
+member of that name, so an extension `suspend fun ISQLite.migrate()` is outranked by it: `db.migrate()`
+compiles, runs the driver's own, creates nothing, throws nothing, and leaves `user_version` at 0.
+Name it `migrateSchema()`, and assert `PRAGMA user_version` after the call rather than trusting that
+it ran — **an extension on a third-party interface is silently outranked by a member of the same
+name**, and the failure is a no-op, not an error.
 
-**The pool is two connections, not ten.** The "more is better" default works against the service
-twice here. First, every sqlx4k connection is a separate `sqlx-sqlite-worker` thread with its own
-page cache and its own malloc arena. Second — and this is the expensive one — **every connection is
-one more reader**, and SQLite's automatic checkpoint is only ever PASSIVE: it does not reset the
-journal while a single active reader is alive. For a service that is read while it is written, that
-window never opens. Measured in tracy (500 writes/s, a read on every tenth): with ten connections
-the process is killed under both 256Mi and 128Mi; with two it went twice as far on twice the
-database while spending a third of the memory. katcher and shildik arrived at two independently — in
-shildik it is written down as the constant `SQLITE_POOL = 2`.
-
-**And whatever the pool size, set a busy timeout.** SQLite has one writer and the second writer gets
-`SQLITE_BUSY` *immediately* unless something is told to wait. A driver that gives up instead of
-waiting is fast because it is doing less — one twin shed **48.7 % of requests under load** while
-passing a parity gate that sent one request at a time.
-
-**If readers overlap, you need your own journal truncation**, on a timer **and** on file size, with
-`TRUNCATE` rather than `RESTART`; and the journal has to be visible from outside, because
-`page_count * page_size` does not count it. The numbers, the symptom to watch for (it is the `-wal`
-file and the readiness probe, not the database file and not an OOM) and the run where the expected
-shape did not appear are in
+**The pool is two connections, not ten.** Every sqlx4k connection is its own worker thread with its
+own page cache and malloc arena, and — the expensive part — **every connection is one more reader**,
+while SQLite's automatic checkpoint is PASSIVE and never resets the journal under a live reader.
+Measured in tracy (500 writes/s, a read on every tenth): ten connections were killed under both
+256Mi and 128Mi; two went twice as far on a third of the memory. **Whatever the pool size, set a
+busy timeout** — one driver without it shed 48.7 % of requests under load while passing a
+one-at-a-time parity gate. **If readers overlap, truncate the journal yourself** (`TRUNCATE`, not
+`RESTART`; on a timer and on size) and expose its size, because `page_count * page_size` does not
+count it. **And a `PRAGMA` sent through the pool reaches one connection out of N.** The numbers, the
+symptoms (the `-wal` file and the readiness probe, not an OOM) and the probes:
 [references/sqlite-under-load.md](references/sqlite-under-load.md).
-
-**Pragmas sent through a pool reach one connection.** `db.execute("PRAGMA ...")` runs on whichever
-connection the pool handed out. Only `journal_mode` survives that (it is written into the file
-header); `foreign_keys` is saved by sqlx enabling it itself in `after_connect`; but
-`synchronous = NORMAL` stays on exactly one connection out of N, and the rest commit with a full
-fsync. It is settled by a probe: N concurrent transactions, each running `PRAGMA synchronous;`. The
-URL does not fix it — sqlx only knows `mode`, `cache`, `immutable`, `vfs`.
 
 ### 5. DI — wire it immediately, and Koin by default
 
-The previous revision said "`ktor-server-di`, not Koin". That is wrong as a rule: Koin 4.2 is
-multiplatform, `koin-ktor` is published with `linuxx64`, and services in this portfolio run on it
-in production. What leaves `commonMain` on a native build, and what replaces it, is
-`ktor-server-feature`'s **Kotlin/Native** bullet and the table it points at.
-
-What matters here is different: **wire DI on the very first repository, not "once there is a
-third".** In tracy, `ktor-server-di` made it into the dependencies and was never wired once;
-everything was assembled by hand in `Application.kt`, and by the sixth milestone `module()` was
-threading five repositories through parameters while the MCP facade took four. The moment when "now
-it is time" never arrives: each next repository is cheaper to append to the existing list than to
-introduce a container for.
+Koin 4.2 is multiplatform and `koin-ktor` is published with `linuxx64`; what leaves `commonMain` on a
+native build, and what replaces it, is `ktor-server-feature`'s **Kotlin/Native** bullet. What matters
+here: **wire DI on the very first repository, not "once there is a third".** In tracy,
+`ktor-server-di` made it into the dependencies and was never wired; by the sixth milestone `module()`
+threaded five repositories through parameters. Each next repository is cheaper to append to the list
+than to introduce a container for, so the moment never arrives.
 
 **Wire it with kore's `installKoreKoin { modules(…) }` (module `kore-koin`, kore 0.1.12 or later),
 not with `install(Koin)`.** koin-ktor's plugin opens a Koin scope for every call. On Kotlin/Native
 each scope owns a stately `Lock`, which on Linux is a `pthread_mutex_t` in a cinterop `Arena` that
-nothing ever frees. So every request, a 404 and a readiness probe included, leaves 16 + 48 bytes of
-malloc behind for good. On tracy that was 154 MB of a 176 MB resident set after four days, with every allocator
-recipe below already applied. Apple targets and the JVM do not leak, so nothing outside a Linux pod
-shows it.
-
-`installKoreKoin` sets the same container where `get`/`inject` in routes already look. It closes the
-container after the engine stops, and it refuses to run next to the plugin. What it gives up is
-`call.scope` (per-request definitions). A service that needs those keeps the plugin and the leak,
-and should say so in its own docs. How to see the leak, because RSS will not:
+nothing ever frees, so every request — a 404 and a readiness probe included — leaves 16 + 48 bytes of
+malloc behind for good: 154 MB of tracy's 176 MB resident set after four days, with every allocator
+recipe applied. Apple targets and the JVM do not leak, so nothing outside a Linux pod shows it.
+`installKoreKoin` sets the same container `get`/`inject` already look in, closes it after the engine
+stops, and refuses to run next to the plugin; what it gives up is `call.scope` — a service that needs
+it keeps the plugin and the leak, and says so in its own docs. How to see the leak,
+because RSS will not:
 [references/memory-under-a-limit.md](references/memory-under-a-limit.md#a-leak-rss-cannot-show-koin-ktors-scope-per-call).
 
 ### 6. The lifecycle: kore, not `ApplicationStopping`
 
 Shutdown order, three probes and `/version` are written by every service itself, and every service
 quietly breaks one of the three. They exist as a library: [kore](https://github.com/youndie/kore) —
-`io.github.youndie:kore-core`, `kore-ktor` and the Gradle plugin `io.github.youndie.kore.build`.
-They resolve from a private Maven repository under `io.github.youndie`; not on Central yet.
-**Take 0.1.9 or later.** Each release from 0.1.6 to 0.1.9 fixed something the wiring below relies
-on, and a service pinned earlier has the defect whatever its code says.
+`io.github.youndie:kore-core`, `kore-ktor` and the Gradle plugin `io.github.youndie.kore.build`,
+resolved from a private Maven repository under `io.github.youndie`, not on Central yet. **Take 0.1.9
+or later**: each release from 0.1.6 to 0.1.9 fixed something the wiring below relies on.
 
 **Why not by hand.** `EmbeddedServer.stop` runs its steps in the **opposite order** on Kotlin/Native
-and on the JVM. Which means `ApplicationStopping` — the place where every example closes the pool
-and the broker connection — runs on native **before** the engine drains and on the JVM after, from
-one and the same source, and nothing reports this. In katcher a report queue hung there: `SIGTERM`
-cancelled the processing of reports already accepted with `202` while the engine kept accepting new
-ones.
+and on the JVM. So `ApplicationStopping` — where every example closes the pool and the broker
+connection — runs on native **before** the engine drains and on the JVM after, from one and the same
+source, and nothing reports this. In katcher a report queue hung there: `SIGTERM` cancelled the
+processing of reports already accepted with `202` while the engine kept accepting new ones.
 
 ```kotlin
 fun main() {
@@ -369,68 +248,25 @@ installKoreProbes(probes.startup, probes.readiness, probes.liveness)
 installKoreVersion(KoreBuildIdentity)
 ```
 
-Ten things the code does not show, each of which has already cost somebody time:
+Nine things this code does not show, each of which has already cost somebody time — why each one is
+there, with the kore issue behind it, is [references/kore-wiring.md](references/kore-wiring.md):
 
-* **`startForKore()`, not `start()`.** With `wait = true` the main thread never reaches the signal
-  wait, the sequence never runs at all, and the process is killed at the end of the grace period —
-  from outside, indistinguishable from "it stopped". `wait = false` is not enough either, on both
-  targets. On the JVM `start()` registers Ktor's own shutdown hook, the JVM runs hooks
-  concurrently, and that one stops the engine at the signal, mid-announce: every probe on a new
-  connection was refused 13 ms after `SIGTERM` ([kore#90](https://github.com/youndie/kore/issues/90)).
-  On Kotlin/Native Ktor's handler is armed between `start` and kore's own, runs `runBlocking` on the
-  signal stack, and a `SIGTERM` in that window **hangs** the process ([kore B-63](https://github.com/youndie/kore/blob/main/docs/backlog/B-63-sigterm-right-after-start-segfaults.md)). `startForKore()`
-  closes both; `EngineDrain` refuses to be built beside a JVM hook that is still on.
-* **The refusal reads a `DrainGate`, never readiness.** Readiness falls at the start of the announce,
-  and the announce exists to keep **serving** while that news reaches every node. A refusal gated on
-  readiness answers `503` to exactly the requests the wait is for. It passed every check for weeks,
-  because it only shows once the pre-drain wait outlasts the requests in flight. Every service wired
-  before kore 0.1.7 did this: `installShutdownRefusal(isShuttingDown = { readiness.isShuttingDown })`
-  is the line to look for, and it is deprecated now. The same gate instance goes to
-  `installShutdownRefusal` and to `EngineDrain`, which opens it as its first act ([kore B-61](https://github.com/youndie/kore/blob/main/docs/backlog/B-61-refusal-starts-at-the-announce.md)).
-* **`reuseAddress = true` on the engine, and a busy port is a configuration error.** CIO defaults the
-  flag to `false`. The JVM ignores that, because the JDK opens every server socket with it on;
-  Kotlin/Native applies it. So a native process restarted in place — a supervisor, a local loop,
-  `--network host` — meets its predecessor's `TIME_WAIT` and cannot bind ([kore B-62](https://github.com/youndie/kore/blob/main/docs/backlog/B-62-native-restart-meets-time-wait.md)). The first
-  restart after turning the flag on still cannot: the old listener needed it too. And on native a
-  failed bind is not an error message: CIO binds inside its own coroutine, and the process ends with
-  `SIGABRT` and fifty lines of stack. If configuration is read through kore's `ConfigSchema`, call
-  `requireListenable(portKey, reuseAddress = true)` after reading it. That makes a port something
-  already holds a one-line refusal naming the variable, with the same flag the engine uses ([kore B-59](https://github.com/youndie/kore/blob/main/docs/backlog/B-59-a-busy-port-aborts-the-native-build.md)).
-* **The database is opened in `main`, before the engine.** Otherwise the release stage has no handle
-  on the pool, and closing it is left to `ApplicationStopping` again — that is, in the wrong order.
-* **Nobody calls `HealthRegistry.start(scope)` for you.** Without that call `/health/ready` answers
-  out of checks that never ran once — `UNKNOWN` forever, which reads as a broken dependency.
-* **The deadlines and the chart's `terminationGracePeriodSeconds` are one number in two places.** No
-  platform tells a process its real budget; kore takes the one it is *told*. The plan's sum must be
-  smaller: in katcher 2 + 10 + 3×3 = 21 against 30.
-* **Participants registered in one stage run concurrently.** `runStage` launches all of a stage's
-  participants and joins them; only the *stages* are ordered. So `consumer(a)` before `consumer(b)`
-  orders nothing, however much it reads like a list of steps. An order needed **inside** a stage is
-  written as composition — one participant calling two things in sequence — and an order needed
-  between resources is written as a **later stage**. Getting this wrong is quiet: the stage still
-  reports `COMPLETED`, and the collision surfaces as an intermittent deadline on a slower machine.
-* **`cancel()` is not "stopped", it is "told to stop".** A `stop()` that cancels its loop's job
-  without joining it returns while the work is still in flight, and on Kotlin/Native that work is
-  often inside an FFI call cancellation never reaches — so it runs on **into the next stage** and
-  collides with what that stage does. `cancelAndJoin` in every background loop's `stop()`. A stage
-  that suddenly reports 200 µs is not healthy, it is a stage where nobody waited for anything.
-  kore's `HealthRegistry` had the same defect ([youndie/kore#79](https://github.com/youndie/kore/issues/79)):
-  call `stopAndJoin()` in its participant, not the deprecated `stop()`.
-* **`/version` is generated source.** Kotlin/Native has neither resources nor a manifest; the plugin
-  writes an object and puts it into `commonMain`. `commit` will be `unknown` wherever the build
-  context has no `.git` — the usual case being `.dockerignore`. And beware: a file git **tracks**
-  but `.dockerignore` excludes reads as deleted inside the build, and the stamp becomes `-dirty`
-  forever.
+* `startForKore()`, not `start()` — either `wait` value loses the sequence, differently per target;
+* the refusal reads a `DrainGate`, never readiness — or it refuses what the announce waits for;
+* `reuseAddress = true` and `requireListenable` — a busy port on native is a `SIGABRT`;
+* the database opens in `main`, before the engine — or its close falls to `ApplicationStopping`;
+* nobody calls `HealthRegistry.start(scope)` for you — readiness stays `UNKNOWN` forever;
+* the deadlines and the chart's `terminationGracePeriodSeconds` are one number in two places;
+* participants of one stage run **concurrently** — an order between resources is a later stage;
+* `cancel()` is "told to stop" — `cancelAndJoin`, and `stopAndJoin()` on `HealthRegistry`;
+* `/version` is generated source — `unknown` without `.git`, `-dirty` behind `.dockerignore`.
 
 The fact to check is not "it compiled" but the transcript: `docker stop` on the container must leave
 `SIGNAL / ANNOUNCE / DRAIN / RELEASE_CONSUMERS / RELEASE_POOLS / EXIT` in the log, each with the word
-`COMPLETED`. Worth checking in CI as well: shutdown is the one part of the lifecycle nobody watches.
-
-**And check what the stages were supposed to accomplish, not only that they ran.** A participant that
-throws is recorded by kore as a failure while its stage still reports `COMPLETED`, so a transcript
-check alone goes green over a release step that quietly stopped working. Pair it with one fact on
-disk — for a service with a journal, that the journal was folded away; see
-[references/sqlite-under-load.md](references/sqlite-under-load.md).
+`COMPLETED`. **And check what the stages were supposed to accomplish, not only that they ran**: a
+participant that throws is recorded as a failure while its stage still reports `COMPLETED`, so pair
+the transcript with one fact on disk — for a service with a journal, that the journal was folded away
+([references/sqlite-under-load.md](references/sqlite-under-load.md)).
 
 ### 7. The Dockerfile: the binary is built **outside**
 
@@ -444,56 +280,26 @@ VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/<name>"]
 ```
 
-Things that have each already cost time:
-
 * **Building Kotlin/Native inside docker takes tens of minutes.** The binary is built on the runner
-  (`./gradlew :server:linkReleaseExecutableLinuxX64`) and only copied into the image.
-* **`ca-certificates` — check, do not install from memory.** In `debian:*-slim` they really are
-  absent, and without them everything outbound over https fails quietly. But in
-  `gcr.io/distroless/cc-*` they are **already there** (`etc/ssl/certs/ca-certificates.crt` —
-  verified by unpacking the image), and the extra layer is not needed.
-* **A multi-stage build works and gives ~55 MB** — tracy is still built that way; **katcher was
-  until 2026-09-15 and is not any more**. Running Gradle inside `docker build` costs 84.3 s of
-  configuration and 58.2 s of toolchain download on *every* run, because the caches it needs cannot
-  persist between runs of a fresh BuildKit builder. Measured numbers and the replacement are in
-  **Build time → The image**, below; what is left of the Dockerfile there is assembly, and
-  `docker build` takes one second.
-* **No library is copied out of the builder, and that is enforced.** `sborka.kmp` links Linux
-  executables with `-Wl,--as-needed`, which drops the three `NEEDED` entries the program never calls
-  — one of them `libcrypt.so.1`, which `gcr.io/distroless/cc` does not carry and which two
-  Dockerfiles here used to drag across by hand. **The line is worth removing for what it takes with
-  it:** a copied system library couples the two images by glibc, the builder's having to be **no
-  newer** than the runtime's, and the mismatch is invisible at build time and fails at exec:
+  and only copied into the image. A multi-stage build works (~55 MB) but pays 84.3 s of configuration
+  and 58.2 s of toolchain download on *every* run; the numbers and the replacement, where
+  `docker build` takes one second, are in [references/build-time.md](references/build-time.md).
+* **`ca-certificates` — check, do not install from memory.** In `debian:*-slim` they are absent and
+  everything outbound over https fails quietly; in `gcr.io/distroless/cc-*` they are already there.
+* **No library is copied out of the builder** — `sborka.kmp` links with `-Wl,--as-needed`, which drops
+  the `libcrypt.so.1` two Dockerfiles used to drag across. A copied system library couples builder
+  and runtime by glibc and fails at exec, not at build:
+  [references/scratch-image.md](references/scratch-image.md#the-builderruntime-glibc-pair-and-why-no-library-is-copied).
+* **The path to the `.kexe` breaks a Dockerfile moved between repositories** — `linuxX64()` and
+  `linuxX64("native")` put it in different places. The convention's `stageNativeImage` puts it at
+  `build/native-image/<baseName>`, and `writeNativeDockerfile` writes the reference image once.
+* **`VOLUME ["/data"]`** — the database is the only state there is.
 
-  ```
-  /app/server: libc.so.6: version `GLIBC_2.38' not found (required by libcrypt.so.1)
-  ```
-
-  This is how the move to Java 25 broke: the tag `gradle:9.7.0-jdk25` without a suffix is Ubuntu
-  26.04 with glibc 2.43, while `distroless/cc-debian12` carries 2.36. The working pair is
-  `gradle:9.7.0-jdk25-noble` (2.39) plus `distroless/cc-debian13`. With no copy there is no pair to
-  get wrong — but the moment a Dockerfile here adds a `COPY --from=build /lib/…` line it is back, and
-  one command settles it: `docker run --rm <build-image> ldd --version | head -1`. The static image
-  below is exactly such a case, and it cannot avoid it.
-* **The path to the `.kexe` is what breaks a Dockerfile moved between repositories.** `linuxX64()`
-  and `linuxX64("native")` put their output at different paths, and `COPY` learns about it at image
-  build time. The `sborka.native-service` convention (§1) stages the binary into
-  `build/native-image/<baseName>`, and then `COPY` does not depend on what the target was called;
-  `writeNativeDockerfile` from the same convention writes the reference two-stage variant — with
-  `ca-certificates` on its own line, the glibc-paired images and the `~/.konan` cache mount — once,
-  and without overwriting an existing file.
-* **`VOLUME ["/data"]`** — the database is the only state there is, and a pod without a volume loses
-  it on every move.
-
-#### `FROM scratch`, in one paragraph
-
-Statically linked and no base image underneath — about **6 MB to pull** below `distroless/cc`, and
-all of the work. Take distroless first: it is one line and about 65 MB, and `ca-certificates` are
-already in it. If `scratch` is still wanted afterwards, the decision, the condition that makes it
-possible at all (the binary must be linked **inside** the image) and the five paths that travel
-beside it — because a static binary still `dlopen`s its charset converters — are in
-[references/scratch-image.md](references/scratch-image.md). sborka's research holds the recipe, and
-holds it in a form that runs.
+**`FROM scratch`** is about **6 MB to pull** below `distroless/cc`, and all of the work. Take
+distroless first: one line, about 65 MB, certificates included. If `scratch` is still wanted, the
+condition that makes it possible at all (the binary must be linked **inside** the image) and the five
+paths that travel beside it — a static binary still `dlopen`s its charset converters — are in
+[references/scratch-image.md](references/scratch-image.md).
 
 ### 8. The chart: probes, secrets, bypassing middleware
 
@@ -503,27 +309,20 @@ Copy `charts/metrik` or `charts/katcher`. What to check with your own eyes:
   dependencies *and* the shutdown latch; `/health/live` (and the `/health` alias) is liveness. A
   readiness probe pointed at `/health` is a probe that cannot fail while the process is alive —
   exactly what kore is taken for. A `startupProbe` with `periodSeconds: 1` and
-  `failureThreshold: 60` instead of a long `initialDelaySeconds`: the pod enters service when it is
-  ready, not at an appointed hour;
+  `failureThreshold: 60` instead of a long `initialDelaySeconds`;
 * **`terminationGracePeriodSeconds` is part of the contract**, not a default: the shutdown plan is
   checked against the number it was *told*, and the chart has to say the same thing;
 * **the memory limit comes after a measurement, and with a positive control** — the same image under
   a deliberately small limit must be **killed**, or the harness cannot detect a failure at all. In
-  katcher the number went 64Mi → 192Mi ("an unexplained crash") → 128Mi, twice the measured peak
-  rather than a round figure. How to run that measurement so that it can fail —
-  a fixed input rather than a closed loop, reading the container's environment, and asking the
-  *subject* whether any load arrived — is
-  [references/memory-under-a-limit.md](references/memory-under-a-limit.md#running-the-measurement-so-that-it-can-fail),
-  and it is worth reading before the first run rather than after the first surprising table;
-* secrets through `secretKeyRef`, not as a value in `values.yaml`: the repository is versioned, the
-  token is a credential, and it should not end up in `helm history` either;
+  katcher the number went 64Mi → 192Mi ("an unexplained crash") → 128Mi, twice the measured peak.
+  How to run that measurement so that it can fail:
+  [references/memory-under-a-limit.md](references/memory-under-a-limit.md#running-the-measurement-so-that-it-can-fail);
+* secrets through `secretKeyRef`, not as a value in `values.yaml` — nor in `helm history`;
 * a PVC for `/data`;
-* **machine routes get their own ingress route around the forward-auth middleware.** The proxy in
-  front of the service expects a browser session; an ingest endpoint and an MCP client have none,
-  and the request is rejected *before* the check inside the application runs. From outside this is
-  indistinguishable from "the server returned 401" — the 401 comes from the proxy. Create the
-  bypass route **only when a token/key is set**, otherwise the bypass appears without the
-  authentication that replaces it.
+* **machine routes get their own ingress route around the forward-auth middleware.** The proxy
+  expects a browser session; an ingest endpoint and an MCP client have none, and the 401 comes from
+  the proxy, before the application's own check runs. Create the bypass route **only when a token/key
+  is set**, otherwise the bypass appears without the authentication that replaces it.
 
 ### 9. CI: the `~/.konan` cache is mandatory, not an optimisation
 
@@ -535,34 +334,23 @@ Copy `charts/metrik` or `charts/katcher`. What to check with your own eyes:
     restore-keys: konan-${{ runner.os }}-
 ```
 
-LLVM and the sysroots weigh hundreds of megabytes; without the cache every run spends minutes
-downloading them. The key is on `libs.versions.toml` because the cache has to be invalidated when the
-Kotlin version changes.
-
-`./gradlew build` includes `ktlintCheck` and the tests. `macosArm64` on a linux runner is silenced
-with `kotlin.native.ignoreDisabledTargets`.
+LLVM and the sysroots weigh hundreds of megabytes, and the key follows `libs.versions.toml` because a
+Kotlin bump must invalidate it. If the setup action already caches `~/.konan`, do not add this block —
+two entries restore one directory twice. `macosArm64` on a linux runner is silenced with
+`kotlin.native.ignoreDisabledTargets`.
 
 ## Build time
 
-A service that takes three minutes to build is a service nobody rebuilds to check something. The
-study — what a fresh machine needs before any of this compiles, the one `gradle.properties` line
-worth adding, why the image is assembled outside `docker build` (84.3 s of configuration and 58.2 s
-of toolchain download on every run otherwise), the cache entries that pay and the ones that did not,
-and how to measure your own before/after without measuring the Gradle cache — is
+A service that takes three minutes to build is a service nobody rebuilds to check something. What a
+fresh machine needs, the one `gradle.properties` line worth adding, why the image is assembled outside
+`docker build`, the caches that paid and the ones that did not, the Gradle daemon you are actually
+measuring, and how to measure your own before/after:
 [references/build-time.md](references/build-time.md).
 
 ## Gotchas already paid for
 
-Not "possible problems" but things found by a run and a deploy. The references are to the metrik
+Not "possible problems" but things found by a run and a deploy. The § references are to the metrik
 research (`docs/research/research-architecture.md` in [metrik](https://github.com/youndie/metrik)).
-
-* **`ktor-client-cio` has no TLS on Kotlin/Native.** It compiles, links and resolves next to
-  `ktor-server-cio`, and the first `https` request fails at runtime with `TLS sessions are not
-  supported on Native platform.` Outbound TLS means `ktor-client-curl`, which links libcurl — so the
-  runtime image gains a shared library and the service leaves sborka's `scratch` recipe, which is
-  exactly why that research excludes metrik's `:server` and shildik's `:distribution`. Decide it when
-  the service is created; found by the first service built from keel, whose entire job was forwarding
-  a payload to somebody else's URL.
 
 | Gotcha | Symptom | What to do |
 |---|---|---|
@@ -573,47 +361,40 @@ research (`docs/research/research-architecture.md` in [metrik](https://github.co
 | **`respondSource` holds the whole body in memory** (§1.8) | 20 parallel bundle downloads → 232 MB against a 256 MB pod limit, OOMKill | an explicit 64 KB loop through `respondBytesWriter` — the peak drops to 157 MB |
 | **`ktor-server-call-logging` is not published for native** | the plugin does not resolve; `callIdMdc` is unavailable | `ktor-server-call-id` is published and covers half the job; write the request log yourself |
 | **`Dispatchers.IO` is `internal` on Kotlin/Native** | not available in `commonMain` | `SelectorManager()` with no arguments picks a dispatcher itself |
-| **`TimeZone.currentSystemDefault()` is not cached on Kotlin/Native** (katcher [#78](https://github.com/youndie/katcher/issues/78), [#79](https://github.com/youndie/katcher/issues/79)) | nothing fails and nothing looks wrong; the same code on the JVM, where the platform caches the zone, costs nothing — so a JVM build of the same service will not show it to you | 33 µs a call against 73 ns for `Clock.System.now()`. Resolve it once into a `val` and pass it: `now().toLocalDateTime(zone)` went 37.6 µs → 277 ns. Grep before shipping, and count the calls per unit of work rather than per file — one row of katcher's error list crossed the lookup three times, twice mapping the row out of the database and once rendering its age, so a page paid for it once per row per pass |
-| **Kotlin/Native forbids commas in backticked test names** | compilation fails on the test | rename it |
+| **`TimeZone.currentSystemDefault()` is not cached on Kotlin/Native** (katcher [#78](https://github.com/youndie/katcher/issues/78), [#79](https://github.com/youndie/katcher/issues/79)) | nothing fails; the JVM caches the zone, so a JVM build will not show it | 33 µs a call against 73 ns for `Clock.System.now()`. Resolve it once into a `val` and pass it: `now().toLocalDateTime(zone)` went 37.6 µs → 277 ns. Count the calls per unit of work, not per file — one row of katcher's error list crossed the lookup three times |
+| **Kotlin/Native forbids commas in backticked test names** | `jvmTest` is green, the native test compilation fails in CI | rename it; the grep is in `kotlin-conventions`' review greps — run it on `commonTest` before pushing |
 | **A PASSIVE SQLite checkpoint does not reset the journal while readers are alive** (tracy M-137) | `-wal` grows linearly, the database file stops growing, half an hour later an OOM on a small heap | a 2-connection pool plus your own `wal_checkpoint(TRUNCATE)` on a timer and on size; `walBytes` in the size response |
-| **koin-ktor's `install(Koin)` leaks a native mutex on every request** (kore B-65) | resident memory climbs for days with no load to speak of; RSS over minutes shows nothing, because the Kotlin/Native heap swings more than the leak | `installKoreKoin { … }` from `kore-koin` (step 5). Check by counting malloc chunks, not RSS: [references/memory-under-a-limit.md](references/memory-under-a-limit.md#a-leak-rss-cannot-show-koin-ktors-scope-per-call) |
-| **glibc gives malloc an arena per thread, counting host cores** | resident memory follows the thread count; `smaps` shows a dozen anonymous mappings of 6–12 MB on 64 MB boundaries | `sborka.native-service`'s reference Dockerfile carries `ENV MALLOC_ARENA_MAX=2` and a test in the convention pins it — but **only after an A/B on your own service**: on a service without a database it did nothing, and combined with `-Xallocator=std` it multiplied peak RSS by ten and OOM-killed three runs of ten (§1) |
-| **`PRAGMA synchronous` reaches one connection out of the pool** | "write throughput differs by a multiple" is true for 1/N of the commits, the rest go with a full fsync | a probe of N concurrent transactions; the only fixes are warming every connection or a knob upstream |
-| **A static glibc is not self-contained: `iconv` loads its converters with `dlopen`** (§7) | an image on `scratch` starts, serves static files and `401`, and returns 500 on the first rendered page: `Failed to open iconv for charset UTF-8 with error code 22` | copy `ld.so.cache`, the loader, `libc.so.6` and the **whole** gconv directory — and out of the build stage: `dlopen` requires the same glibc build as the `libc.a`. The five paths and their price: sborka `research-static-binary.md` §1.5c |
-| **`unable to find library -lc` on a static link** | reads like a linker-flag problem | `gradle:*-noble` carries no static archives (`libc.a`, `crt1.o`, the gcc directory) — one `g++` install supplies them; the gcc version and `libGcc.linux_x64=…/13` move together |
-| **A repository's `org.gradle.jvmargs` may not be in effect at all** (build-time study) | the daemon runs a heap nobody in the project declared; an experiment that edits this value measures an absent variant and reports a clean "no effect" | `~/.gradle/gradle.properties` on the machine wins. Read the running daemon — `pgrep -af GradleDaemon \| grep -oE '\-Xmx[0-9]+[a-zA-Z]'` — before believing the file. Same repository, two machines, opposite answers: one had a home file with `-Xmx5g`, the other none and the project's `-Xmx4G` ran |
-| **There is one JVM during a native link, not two** (build-time study) | `kotlin.daemon.jvmargs` is attached to a process that does not exist while linking; `kotlin.native.jvmArgs` has no JVM to size | a census of `java` processes 45 s into a release link shows Gradle daemons and nothing else — the Kotlin/Native compile runs **inside** the Gradle daemon. Tune `org.gradle.jvmargs`, and remember LLVM allocates outside that heap anyway |
-| **Two Gradle daemons where you assumed one** | measurements drift for no visible reason; on a small box the release link is OOM-killed | daemons that differ in JVM args or JDK do not reuse each other. `pgrep -c -f GradleDaemon` before a campaign; a stray one from an earlier JDK holds gigabytes |
+| **koin-ktor's `install(Koin)` leaks a native mutex on every request** (kore B-65) | resident memory climbs for days with no load to speak of; RSS over minutes shows nothing | `installKoreKoin { … }` from `kore-koin` (step 5). Check by counting malloc chunks, not RSS |
+| **glibc gives malloc an arena per thread, counting host cores** | resident memory follows the thread count; `smaps` shows a dozen anonymous mappings of 6–12 MB on 64 MB boundaries | `MALLOC_ARENA_MAX=2` in the reference Dockerfile — **only after an A/B on your own service**: without a database it did nothing, and with the system allocator it multiplied peak RSS by ten (step 1) |
+| **`pagedAllocator=false` buys the memory with CPU** (xyk, pgo-native-spike) | survives a limit the paged arms do not, at +19 % CPU per request | take it only for a limit nothing else survives, measured; spell it `-Xbinary=pagedAllocator=false`, not the deprecated `-Xallocator=std` (step 1) |
+| **`PRAGMA synchronous` reaches one connection out of the pool** | "write throughput differs by a multiple" is true for 1/N of the commits | a probe of N concurrent transactions; the only fixes are warming every connection or a knob upstream |
+| **A static glibc is not self-contained: `iconv` loads its converters with `dlopen`** (step 7) | an image on `scratch` serves static files and `401`, then 500 on the first rendered page: `Failed to open iconv for charset UTF-8 with error code 22` | copy the loader, `libc.so.6`, `ld.so.cache` and the **whole** gconv directory, out of the build stage: [references/scratch-image.md](references/scratch-image.md) |
+| **`unable to find library -lc` on a static link** | reads like a linker-flag problem | `gradle:*-noble` carries no static archives — one `g++` install supplies them; the gcc version and `libGcc.linux_x64=…/13` move together |
 
 ## What only a deployment checks
 
-The class of bugs "works locally, breaks in the cluster" **exists here and is not covered by tests**.
-Known members:
+The class of bugs "works locally, breaks in the cluster" **exists here and is not covered by tests**:
 
 * the `Host` check in the MCP transport: by default only localhost is allowed, and locally the Host
   is always localhost — the test that should have caught this is impossible in principle;
-* forward-auth in front of machine routes (see step 8);
+* forward-auth in front of machine routes (step 8);
 * a global `StatusPages` with a redirect to `/login`: right for a browser, but a machine client gets
   a login page instead of an error code. Redirect only for `Accept: text/html`.
 
-**The conclusion worth applying to the plan:** deploy earlier than feels necessary. In katcher the
-deploy found two failures, each of which broke an endpoint completely, with 64 green tests.
+**Deploy earlier than feels necessary.** In katcher the deploy found two endpoint-breaking failures
+under 64 green tests.
 
 ## What not to do
 
 * **Do not build Kotlin/Native inside docker** — minutes turn into tens of minutes.
 * **Do not drag in nginx for static files.** Native Ktor serves them itself: `SystemFileSystem`
-  (kotlinx-io) + `respondBytesWriter` + `ContentType.defaultForFilePath`. The caveats about
-  compression and memory are above. There is nowhere to get `Last-Modified` from (`FileMetadata` has
-  no modification time) — compute an ETag from the content once at startup.
+  (kotlinx-io) + `respondBytesWriter` + `ContentType.defaultForFilePath`. There is nowhere to get
+  `Last-Modified` from — compute an ETag from the content once at startup.
 * **Do not rely on a fake where the component swallows its own errors.** A sender, a receiver, a
   notifier must have a test against a real socket and a "send a test one" handle that returns the
   fact of delivery, not the intent. In metrik two such components stayed silent in production for
   months with green tests.
-* **Do not put off `LICENSE`.** katcher still has none, which formally makes the repository unusable.
-  One file closes it, before the first image is published.
+* **Do not put off `LICENSE`.** One file, before the first image is published.
 
-## Examples
-
-`examples/deploy.md` — the Dockerfile with pre-compressed static files, the publish workflow, the key
-pieces of the chart.
+Example: [examples/deploy.md](examples/deploy.md) — the Dockerfile with pre-compressed static files,
+the publish workflow, the key pieces of the chart.
