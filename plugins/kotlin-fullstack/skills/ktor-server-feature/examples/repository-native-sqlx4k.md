@@ -78,6 +78,26 @@ What matters here rather than in the JVM version:
 - **The owner (or tenant) filter is in every statement**, exactly as on the JVM.
 - **No `java.*`**: time is `kotlin.time.Clock.System.now()`, files are okio.
 
+## NUL in text does not survive the native driver
+
+On Kotlin/Native sqlx4k hands a TEXT parameter to its Rust half as a C string, so **a bound value
+holding NUL (U+0000) is cut at the NUL, silently**: `"before\u0000after"` is stored as `"before"`
+and the statement succeeds. The JVM half binds through JDBC and stores all of it, so a suite that
+runs only on the JVM never sees the difference. The same cut applies to a value in a `WHERE`
+clause: an id with a NUL in it looks up whatever its prefix names.
+
+**Reading a TEXT that holds NUL kills the process.** Every non-BLOB column crosses back as a C
+string too, built with `CString::new(..).unwrap()`; a TEXT with a NUL in it — made by `char(0)`,
+written by the JVM half or by any other client — panics there, and the library is built with
+`panic = "abort"`, so there is no exception for a repository to catch. Plain text through the same
+read is fine, and the JVM half returns `"before\u0000after"` whole.
+
+So **refuse NUL at the API boundary** — `400` before anything is bound, for ids from a path or a
+query string as well as for fields in a body — and **keep binary payloads in a BLOB**, which is
+bound with its length and keeps every byte. Do not `CAST` a BLOB to TEXT in a `SELECT`: that hands
+its NULs to the read above. Each of the three was checked with a probe against sqlx4k 1.13.1 on
+`linuxX64` and on the JVM; the first was found by a webhook gateway (youndie/xyk#17).
+
 ## Wiring it, if the build uses `ktor-server-di` rather than Koin
 
 ```kotlin
