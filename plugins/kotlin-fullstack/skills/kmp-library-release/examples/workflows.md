@@ -9,8 +9,8 @@ skill — the repository's own release path wins — applies to each.
 
 ```yaml
 # .github/workflows/publish.yaml — the library's side. Everything else is sborka's reusable workflow:
-# checkout, setup-kotlin, the version from determine-version (head + run number), the check, the
-# publish, and the proba job on what the server now serves.
+# checkout, setup-kotlin, the version from determine-version (head + run number; a head ending in
+# -SNAPSHOT is refused), the check, the publish, and the proba job on what the server now serves.
 name: publish
 
 on:
@@ -60,19 +60,21 @@ find ~/.m2/repository/io/github/example/ledger -name '*-X.Y.Z.pom' | sort   # th
 git tag -a vX.Y.Z -m "X.Y.Z" <sha> && git push origin vX.Y.Z
 
 # 2. One dispatch, in sborka, where the signing key and the portal token live. The dispatch is
-#    asynchronous and the run's title names no library, so `gh run list --limit 1` straight after
-#    it can be the previous run — somebody else's library. Find it by time, then by its log.
+#    asynchronous, so `gh run list --limit 1` straight after it can be the previous run — somebody
+#    else's library. The run's title is built from the inputs (sborka#124): select by it, and by
+#    time, because a second dispatch of the same inputs carries the same title.
 since=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+title="central youndie/<name> X.Y.Z from vX.Y.Z"
 gh workflow run central.yaml -R youndie/sborka \
   -f repository=youndie/<name> -f ref=vX.Y.Z -f version=X.Y.Z \
   -f konan-cache=true                       # only if the build has Kotlin/Native targets
 run=""
 until [ -n "$run" ]; do sleep 5
   run=$(gh run list -R youndie/sborka --workflow central.yaml --event workflow_dispatch \
-    --json databaseId,createdAt -q "[.[] | select(.createdAt >= \"$since\")] | last | .databaseId // empty")
+    --json databaseId,displayTitle,createdAt \
+    -q "[.[] | select(.displayTitle == \"$title\" and .createdAt >= \"$since\")] | last | .databaseId // empty")
 done
 gh run watch -R youndie/sborka "$run" --exit-status
-gh run view -R youndie/sborka "$run" --log | grep -F "uploading youndie/<name> X.Y.Z"   # yours, or stop
 
 # 3. A person: the deployment on the Central portal → read the file list → Publish.
 # 4. Wait for the files, every coordinate, not the first one.

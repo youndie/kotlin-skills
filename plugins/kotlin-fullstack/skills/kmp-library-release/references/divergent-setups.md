@@ -59,6 +59,15 @@ copy is a second place for the head to live:
   cannot tell two publishes apart;
 * kafkakn shipped six builds as one `SNAPSHOT` before every publish got its own number (`e419edd`).
 
+A copy also misses what the action checks: since sborka
+[#125](https://github.com/youndie/sborka/pull/125) `determine-version` refuses a head ending in
+`-SNAPSHOT`, which it would otherwise publish as `X.Y.Z-SNAPSHOT.N`, and a key or file that is not
+there fails with a line naming it instead of going red silently. The other side of that: a
+repository moving onto the action with a `-SNAPSHOT` head is refused on its first run. sborka's
+`docs/migration.md` counts seven such heads (bochka, booblik, kachok, mongkn, s3kn, smtpkn, tracy),
+so the migration's pull request sets the plain `X.Y.Z` of the next release — or, where the head is
+kept on purpose, as mongkn's is, passes the whole version to `publish-wip.yaml` instead.
+
 ## The group, and the credentials it implies
 
 A per-project group — `io.github.youndie.<name>` — is one path prefix on the snapshot repository,
