@@ -112,7 +112,7 @@ each measured:
   five, peaking at the limit, and costs **+19 % CPU per request** (paired, ±2.3 %). The convention
   does not offer it; a service that needs it sets it itself, with the measurement beside the line;
 * **`MALLOC_ARENA_MAX=2` with the system allocator** — with `-Xallocator=std` it multiplied peak RSS
-  tenfold and OOM-killed three runs of ten; on the replacement flag it has not been measured.
+  tenfold and OOM-killed three runs of ten; on the replacement flag, on xyk, it killed nothing.
 
 The numbers, the two-sided page-size table, and how to measure your own service — including reading
 the peak from the cgroup rather than from `VmHWM` — are
