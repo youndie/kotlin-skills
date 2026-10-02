@@ -246,7 +246,10 @@ way. Wait, then decide in `jq`, over **every** check run on the **head commit**:
 pr=<n>; req='["check","suite"]'          # checks that must have run and passed, by name
 read -r sha base <<<"$(gh pr view "$pr" --json headRefOid,baseRefName --jq '"\(.headRefOid) \(.baseRefName)"')"
 runs() { gh api "repos/{owner}/{repo}/commits/$sha/check-runs?per_page=100"; }
-q='def latest: .check_runs | group_by(.name) | map(max_by(.started_at));'
+# Latest run per name by completion; a run that has not completed sorts last, so a queued or running
+# run of a name blocks the wait and the verdict (a queued run's started_at is its creation time, so
+# max_by(.started_at) let a finished push run stand in for a still-queued pull_request run).
+q='def latest: .check_runs | group_by(.name) | map(max_by(.completed_at // "9999"));'
 for _ in $(seq 60); do                   # thirty minutes; past that it is a finding, not a wait
   runs | jq -e --argjson req "$req" "$q"' latest | (($req - map(.name)) | length) == 0 and all(.[]; .status == "completed")' >/dev/null && break
   sleep 30
