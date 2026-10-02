@@ -69,6 +69,14 @@ repository moving onto the action with a `-SNAPSHOT` head is refused on its firs
 so the migration's pull request sets the plain `X.Y.Z` of the next release — or, where the head is
 kept on purpose, as mongkn's is, passes the whole version to `publish-wip.yaml` instead.
 
+Since sborka [#133](https://github.com/youndie/sborka/pull/133) the action also refuses a head the
+remote has already tagged `v<head>` (asked with `git ls-remote`, since a checkout fetches no tags):
+its `X.Y.Z.N` would sort above the release and read as a rebuild of it. The error names the next
+patch to set, no version is written, and the `tagged` output names the tag. It was a warning first
+([#131](https://github.com/youndie/sborka/pull/131)), until oldge-ui, the last caller whose head
+stood on a release, moved it (oldge-ui#14). A remote that cannot be asked is still only a warning.
+A copy of the version step checks none of this.
+
 ## The group, and the credentials it implies
 
 A per-project group — `io.github.youndie.<name>` — is one path prefix on the snapshot repository,
