@@ -51,8 +51,9 @@ copy is a second place for the head to live:
 
 * shildik 0.4.1's sources went out as `0.4.0.20` because the workflow spelled the head itself
   (`b0ea2ff`, "read the version head instead of spelling it twice");
-* appframe's `deploy.yml` still publishes `0.2.0.<run>` from a hard-coded head, beside
-  `gradle.properties`;
+* appframe's `deploy.yml` spelled `0.2.0.<run>` beside the same head in `gradle.properties`, so
+  moving the head after the 0.2.0 release took two edits, neither was made, and the builds after it
+  went out as `0.2.0.29`–`.30`; it reads the head through `determine-version` since `f448c5c`;
 * mongkn's `publish.yml` writes `0.1.<run>` itself, beside a `gradle.properties` head that says
   `0.1.0-SNAPSHOT` — two numbers, and neither is read from the other;
 * s3kn's manual workflow passes no `-PVERSION` and overwrites one `0.1.0-SNAPSHOT`, so a consumer

@@ -90,11 +90,11 @@ number**, so re-running a failed snapshot run asks for the very version it just 
 already has any artefact before writing one — a `curl` per file of the local tree; kvadrant-ui puts
 the same question in a `doFirst` on every publish task. sborka's conventions do not do it for you.
 
-**The head in `gradle.properties` names the next release, and moves before it.** Left at `0.1.0`
+**The head in `gradle.properties` names the next release, never a tagged one.** Left at `0.1.0`
 while `0.2.0` is released, the snapshots that follow come out as `0.1.0.N` — sorting below the
-release while carrying newer code (chronik raised it first, B-18). And in Maven ordering `X.Y.Z.N`
-sorts **above** `X.Y.Z`: a consumer on a snapshot of the line is never offered the release as an
-upgrade. **Where `determine-version` computes the version, the head is a plain `X.Y.Z`.** The
+release while carrying newer code (chronik raised it first, B-18); left at `0.2.0` after it, they
+sort above it ([step 5](#5-the-tag-names-the-commit-that-was-built)). **Where `determine-version`
+computes the version, the head is a plain `X.Y.Z`.** The
 action puts the run number on the tail of whatever head it reads, so it refuses a head ending in
 `-SNAPSHOT` (in any case) and its error names the `X.Y.Z` to set (sborka
 [#125](https://github.com/youndie/sborka/pull/125)); before that check kontainer's first publish
@@ -309,6 +309,12 @@ consumer resolves. So:
   so the tag and the tree are one by construction. The exception is a tag older than the repository's
   ability to publish — bochka's `v0.6.0` predated `sborka.central`, so 0.6.0 went out from `main`
   and the workflow diffed the sources against the tag (`9c86fd9`). That diff only **warns**: read it;
+* **right after the tag, the head moves to the next patch**, `X.Y.(Z+1)`, in the first change merged
+  after it. Maven's ordering, which Renovate follows, puts `X.Y.Z.N` above `X.Y.Z`: a build under
+  the old head outranks the release and reads as a rebuild of it — appframe's stayed at `0.2.0`, and
+  a consumer on `0.1.26` was offered `0.2.0.30`, two commits past the release (appframe `f448c5c`).
+  A snapshot still outranks the release for a consumer that sees its repository — `X.Y.(Z+1).N`
+  too — but its number now says it came after;
 * **a tag is never moved, and a version is never re-published under it.** The clearest case is an
   image rather than a library, and the rule is the same: katcher's `0.8.1` had been built before the
   fix it was supposed to carry, and it shipped as `0.8.2` because "republishing 0.8.1 would give the
@@ -320,8 +326,9 @@ consumer resolves. So:
 * a snapshot line that tags every publish (kafkakn tags `v<version>` per run) keeps the same rule:
   the tag is written by the run that built it.
 
-**Checkable fact:** `git rev-parse vX.Y.Z^{commit}` is the commit the sborka run checked out, and the
-fix you are releasing is in `git log vX.Y.Z`, not only in `git log main`.
+**Checkable fact:** `git rev-parse vX.Y.Z^{commit}` is the commit the sborka run checked out, the
+fix you are releasing is in `git log vX.Y.Z`, not only in `git log main`, and the first snapshot
+after the tag is `X.Y.(Z+1).<run>` (`determine-version` logs `version is …`), not `X.Y.Z.<run>`.
 
 ## 6. Move the consumers — or hand them to Renovate on purpose
 

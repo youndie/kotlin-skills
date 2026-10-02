@@ -58,6 +58,10 @@ find ~/.m2/repository/io/github/example/ledger -name '*-X.Y.Z.pom' | sort   # th
 
 # 1. The tag names the commit that will be built — the green head of main, by sha.
 git tag -a vX.Y.Z -m "X.Y.Z" <sha> && git push origin vX.Y.Z
+#    Then, before anything else merges, the head moves past it: one pull request setting
+#    version=X.Y.(Z+1) in gradle.properties. The release does not read the head (it is built from
+#    the tag with -PVERSION=X.Y.Z), so this can go in while step 2 runs; its snapshot run logs
+#    "version is X.Y.(Z+1).<run>" — X.Y.Z.<run> would sort above the release it follows.
 
 # 2. One dispatch, in sborka, where the signing key and the portal token live. The dispatch is
 #    asynchronous, so `gh run list --limit 1` straight after it can be the previous run — somebody

@@ -49,7 +49,8 @@ tag names the commit you mean, `check` is green on it, the version is the one yo
   `--configuration-cache` (zavarnik `zavarnik-gradle-plugin/build.gradle.kts`).
 * **`io.github.<login>` as the id prefix** was accepted without question for the account with that
   GitHub login.
-* **The head moves before the next release**: snapshots `0.1.0.N` sort above `0.1.0`.
+* **The head moves past `0.1.0` as soon as `v0.1.0` is tagged**: every snapshot built under it comes
+  out as `0.1.0.N` and sorts above `0.1.0` ([step 5](../SKILL.md#5-the-tag-names-the-commit-that-was-built)).
 
 ## The marker takes its group from the id
 
