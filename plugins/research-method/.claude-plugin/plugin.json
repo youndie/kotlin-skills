@@ -1,7 +1,7 @@
 {
   "name": "research-method",
   "description": "Method skills that are not about Kotlin: running a time-boxed study, spike or measurement campaign so its verdicts survive review — a pre-registered brief frozen by script, a stand that is pinned, controls that prove every harness can fail, a protocol with a ruler, and a verdict per question with every number traceable to its log.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "youndie"
   },
