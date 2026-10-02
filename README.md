@@ -40,7 +40,15 @@ convention compels, a skill describes**, and where the two disagree the conventi
 | [`compose-client-feature`](plugins/kotlin-fullstack/skills/compose-client-feature/SKILL.md) | a screen or feature on the client: repository, use case, view model, Component / Content, navigation, session |
 | [`design-to-compose`](plugins/kotlin-fullstack/skills/design-to-compose/SKILL.md) | implementing a screen from a Claude Design canvas or design PNGs and proving it matches: reference PNGs, tokens, fixtures, `viddikDesignParity`, the diff loop |
 | [`kmp-testing`](plugins/kotlin-fullstack/skills/kmp-testing/SKILL.md) | writing or placing any test; why a green build missed a bug |
+| [`kmp-library-release`](plugins/kotlin-fullstack/skills/kmp-library-release/SKILL.md) | releasing a KMP library or a Gradle plugin: snapshot or release, the pre-flight before the first upload, publishing through sborka's workflows, waiting for every module, verifying as a consumer with proba and the probes it cannot replace, the tag, moving the consumers |
+| [`kotlin-native-cinterop`](plugins/kotlin-fullstack/skills/kotlin-native-cinterop/SKILL.md) | binding a C (or C-ABI Rust) library into Kotlin/Native: whether to bind at all, static archive or system library, building against the sysroot, where each `.def` flag must live so a consumer links, ownership and threads across the boundary, testing and publishing the klib, the runtime image |
 | [`kotlin-conventions`](plugins/kotlin-fullstack/skills/kotlin-conventions/SKILL.md) | naming, abstractions, comments, code review |
+
+A second plugin, `research-method`, holds what is not about Kotlin:
+
+| Skill | Use it when |
+|---|---|
+| [`measurement-study`](plugins/research-method/skills/measurement-study/SKILL.md) | running a time-boxed study, spike or measurement campaign — or one measurement inside a product backlog item — so that its verdicts survive review: a pre-registered brief frozen by script, a pinned stand, positive controls, a ruler, interleaved arms, a verdict per question with every number traceable to its log |
 
 How they relate:
 
@@ -77,6 +85,10 @@ claude plugin marketplace add youndie/kotlin-skills
 claude plugin install kotlin-fullstack@kotlin-skills
 ```
 
+```bash
+claude plugin install research-method@kotlin-skills
+```
+
 The skills then appear as `/kotlin-fullstack:<skill>` and trigger on their own when a task
 matches. If you already have personal skills with the same names, the plugin namespace keeps
 them apart, but Claude picks between two matching descriptions by description alone; retire or
@@ -91,13 +103,13 @@ for s in plugins/kotlin-fullstack/skills/*; do ln -s "$(pwd)/$s" ~/.claude/skill
 ## Layout
 
 ```
-.claude-plugin/marketplace.json          the marketplace: one plugin
+.claude-plugin/marketplace.json          the marketplace: two plugins
 plugins/kotlin-fullstack/
   .claude-plugin/plugin.json
   skills/<name>/SKILL.md                 the skill (400 lines at most)
   skills/<name>/examples/*.md            longer code, lifted from the reference project
   skills/<name>/references/*.md          build-file skeletons, grep checklists
-  skills/<name>/scripts/*.mjs            small dependency-free tools a skill runs (node)
+  skills/<name>/scripts/*                small dependency-free tools a skill runs (node, python)
   skills/<name>/templates/*.md           documents a skill fills in
   skills/<name>/evals/evals.json         test prompts with checkable expectations (skill-creator shape)
   skills/<name>/evals/files/             fixtures those prompts run against

@@ -1,0 +1,90 @@
+{
+  "skill_name": "kmp-library-release",
+  "evals": [
+    {
+      "id": 1,
+      "name": "the-version-exists-when-the-run-ends",
+      "prompt": "The snapshot workflow of the library at {fixture} is publishing 0.3.0.10 right now — every module in one run, which usually takes about ten minutes; it started four minutes ago. io.github.example:standard:0.3.0.10 already answers 200 in the snapshot repository. One of our services pins the library's core and standard modules at 0.3.0.9. Bump it to 0.3.0.10 now and tell me whether that is safe to merge.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} library",
+      "expected_output": "The answer does not treat one artefact answering 200 as the version existing. It waits for the publishing run to finish (by its status, not by watching files appear), then checks that every coordinate the service takes resolves — core included, root and per-target modules — and only then bumps. It explains that a consumer bumped mid-run gets 'Could not find …:0.3.0.10' on a sibling, which looks like a wrong version and is a race.",
+      "expectations": [
+        "The answer does not declare the bump safe while the publishing run is still in progress",
+        "The answer names the publishing run's completion (its status or conclusion) as the condition to wait for, rather than the appearance of a particular artefact",
+        "After the run, the answer checks every coordinate the service depends on, explicitly including core and not only standard",
+        "The answer states that checking one module, or the last one alphabetically, does not prove the others are uploaded, because upload order is not guaranteed",
+        "The answer explains that a resolution failure on a sibling during the run would look like a wrong version number while being a race"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "a-new-module-and-its-coordinate",
+      "prompt": "Add the new :testing module of {fixture} to what the library publishes, so it goes out with the next snapshot. The repository already publishes :core and :standard.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} new-module",
+      "expected_output": "The answer notices that the group is repeated per module and missing from :testing, and moves the coordinate to one place every module takes (sborka.group in gradle.properties with sborka's base/publish conventions, or one convention plugin) instead of adding one more group line. It checks the result by publishing into a local directory with the version passed explicitly and reading where each module landed. Because the library publishes under the account-wide group io.github.example, it warns that each never-published coordinate — every per-target one included — may be refused with 403 by a snapshot repository whose write credentials are scoped to artefact paths, and that this shows only at the first upload; it may recommend a per-project group, which one route covers.",
+      "expectations": [
+        "The answer identifies that :testing has no group while :core and :standard set one in their own build files",
+        "The group ends up declared once for every module (for example sborka.group in gradle.properties, or a single convention), not as a third copy in testing/build.gradle.kts alone",
+        "The answer explains that a module without its group publishes under a coordinate derived from somewhere else, and that compilation and tests do not show it",
+        "The answer verifies with a local publication (publishToMavenLocal or a directory repository) and reads the directory each module and target landed in",
+        "The answer says the new module's coordinates, per target, may need write permission on the snapshot repository before the first publish, because under the account-wide group a path-scoped token refuses them with 403 — or it recommends moving to a per-project group and says that is why"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "implementation-hides-the-supertype",
+      "prompt": "Prepare the library at {fixture} for its first release to Maven Central. Check that it is ready and change what has to change before anything is published.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} library",
+      "expected_output": "The answer finds that :standard depends on :core through implementation while its public API hands out LedgerEntry (CashEntry's supertype, cash()'s return type), changes it to api, and explains that a consumer of the standard module alone could not compile against those signatures while the repository's own build stays green. It verifies through the published metadata (apiElements of the .module file in a local publication, or proba's api-unreachable after a snapshot), not through the repository's build. It also covers the release mechanics: the library is not on sborka.publish, so taking sborka's conventions (group declared once, sborka.central=true) is a change of its own, proven by a snapshot, before a tag and sborka's central.yaml upload it staged for a person to release.",
+      "expectations": [
+        "The answer changes implementation(project(\":core\")) in :standard to api",
+        "The reason given is that LedgerEntry appears in :standard's public signatures (as a supertype or a return type)",
+        "The answer states that the repository's own build and tests cannot show this, because project dependencies resolve inside the build anyway",
+        "The verification proposed reads the published or locally published module metadata (apiElements / the api variant) or runs proba's api-unreachable, rather than relying on the build passing",
+        "The answer does not propose publishing to Central from the local machine; because the library is not on sborka.publish, it proposes taking sborka's conventions (sborka.group, sborka.publish, sborka.central=true) as a separate change proven by a snapshot, and then a tag and sborka's central.yaml, with the final release step left to a person"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "a-half-publish-spends-its-number",
+      "prompt": "The snapshot publish of {fixture} failed — publish.log has the output and NOTES.md what changed since. The token is fixed now. Re-run the publish of 0.1.1 so the consumers can take it.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} failed-publish",
+      "expected_output": "The answer does not re-run 0.1.1. It reads the log: core-jvm and standard-jvm 0.1.1 are already on the repository, so a re-run hits 409 Conflict on them and its output no longer names the 403 that stopped the first run; 0.1.1 is a half version that resolves for nobody. It identifies the 403 as the path scope of the token on a new coordinate, publishes the next number (0.1.2), and adds or runs a pre-flight that checks every coordinate is free before the first upload.",
+      "expectations": [
+        "The answer declines to re-run the publish under 0.1.1",
+        "The answer explains that the artefacts already written for 0.1.1 make a re-run fail with 409, because the repository refuses to overwrite a version",
+        "The answer points out that the re-run's failure would no longer mention the original 403",
+        "The answer reads the 403 as the write token not covering the new module's path, not as wrong credentials",
+        "The answer moves the release to the next version number (0.1.2 or later) and checks, before the first upload, that none of its coordinates already exist on the repository"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "a-bump-moves-the-family",
+      "prompt": "Bump our lifecycle library in the service at {fixture} from 0.1.4 to 0.1.12. CI on the branch compiled and linked both targets green. Is it ready to merge?",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} consumer-bump",
+      "expected_output": "The answer does not call a green compile and link enough. Because lifecycle-ktor 0.1.12 carries ktor-server-core 3.6.0 through api while the service's own Ktor is 3.5.2, conflict resolution lifts that one Ktor module and leaves its siblings (content-negotiation, serialization, cio) on 3.5.2. The answer checks the resolved graph for ' -> ' inside io.ktor, moves the whole Ktor family to 3.6.0 together with the bump, and asks for a test that sends a request through call.receive on the targets the service ships (the native one included), because the mismatch fails at runtime, not at compile time.",
+      "expectations": [
+        "The answer identifies that lifecycle-ktor 0.1.12 brings ktor-server-core 3.6.0 through api while the catalog pins Ktor 3.5.2",
+        "The answer inspects the resolved dependency graph (dependencies or dependencyInsight, looking for upgraded io.ktor modules) rather than reading the catalog alone",
+        "The bump raises the whole Ktor family to one version together, not lifecycle alone",
+        "The answer explains that mixed Ktor modules can compile and link and still fail at runtime (an IrLinkageError or NoSuchMethodError on call.receive or similar)",
+        "The answer requires a test that exercises a real request on the shipped targets, including linuxX64, before calling the bump ready"
+      ]
+    }
+  ]
+}

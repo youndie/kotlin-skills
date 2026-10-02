@@ -7,7 +7,12 @@
     {
       "name": "kotlin-fullstack",
       "source": "./plugins/kotlin-fullstack",
-      "description": "Skills for Kotlin full-stack work: a product brief for documentation and design, a backlog loop (one item, one pull request), KMP project layout, the shared wire contract, Ktor server features compiled to JVM and Kotlin/Native, a new Kotlin/Native service stood up from nothing to a deployed image, Compose Multiplatform client features, screens built from a design canvas and measured against it, testing across both, and naming and abstraction conventions."
+      "description": "Skills for Kotlin full-stack work: a product brief for documentation and design, a backlog loop (one item, one pull request), KMP project layout, the shared wire contract, Ktor server features compiled to JVM and Kotlin/Native, a new Kotlin/Native service stood up from nothing to a deployed image, Compose Multiplatform client features, screens built from a design canvas and measured against it, testing across both, naming and abstraction conventions, releasing a library and verifying it as a consumer, and binding a C library into Kotlin/Native so that consumers link."
+    },
+    {
+      "name": "research-method",
+      "source": "./plugins/research-method",
+      "description": "A study, spike or measurement campaign whose verdicts survive review: pre-registration frozen by script, pinned stand, positive controls, a measured ruler, interleaved arms, a verdict per question with every number traceable to its log."
     }
   ]
 }

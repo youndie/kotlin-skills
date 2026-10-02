@@ -1,0 +1,95 @@
+{
+  "skill_name": "kotlin-native-cinterop",
+  "evals": [
+    {
+      "id": 1,
+      "name": "linker-options-travel-in-the-klib",
+      "prompt": "The Kotlin Multiplatform library at {fixture} binds a C library through cinterop in the module ev-core, and its native tests pass. Prepare it for publishing to a Maven repository so that other projects can depend on ev-core from a linuxX64 executable. Make the build changes, and say how we will know it worked before anyone else finds out.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} bundle-binding",
+      "expected_output": "The static archives move out of linkerOpts on the module's own binaries and into the .def as staticLibraries (names only), with their directories handed in from Gradle, so cinterop copies them into the published klib. The check proposed is a separate consumer build that resolves the published coordinate, declares no linker options of its own, and links and runs an executable.",
+      "expectations": [
+        "The .def file names the archives (staticLibraries, or linkerOpts inside the .def) after the change",
+        "build.gradle.kts no longer names libev.a, libssl.a or libcrypto.a in linkerOpts on any binary",
+        "The .def file contains no absolute path from the build machine; the archive directories come from Gradle (extraOpts -libraryPath, or a generated .def)",
+        "The answer explains that the module's own tests linked because its build file named the archives, so the suite could not see that the published klib carries none",
+        "The proposed verification links (not only compiles) an executable in a separate build that depends on the published coordinate and declares no linker options of its own",
+        "The answer names a way to inspect the published cinterop klib itself, such as its manifest or its included/ directory"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "host-built-library-meets-the-sysroot",
+      "prompt": "Linking the native test binary of {fixture} fails; the output is in link-error.txt. The C library is built by ci/ev/build.sh on an Ubuntu 24.04 runner. Fix the build so it links, and so it stays fixed when Kotlin or the C library is bumped.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} host-built",
+      "expected_output": "The failure is attributed to Kotlin/Native linking against its own old-glibc sysroot, not to the C library. The C library is built in an old-glibc image (manylinux2014 or equivalent) — or, if the toolchain override is offered, its instability across Kotlin patch releases and its reach into consumers' builds are stated — and a check is added that refuses archives still expecting post-2.19 symbols from libc.",
+      "expectations": [
+        "The answer attributes the undefined symbols to Kotlin/Native's bundled sysroot having an older glibc than the runner, not to a defect in the C library",
+        "The fix builds the C library in an image whose glibc is older than 2.28 (for example manylinux2014), or explicitly compares that route with -Xoverride-konan-properties",
+        "If -Xoverride-konan-properties is proposed, the answer says those keys can change between Kotlin patch releases or that a consumer's build would need them too",
+        "No builder image with glibc 2.28 or newer (such as manylinux_2_28) is proposed as the fix",
+        "The build gains a check that fails when an archive still references a post-2.19 glibc symbol from libc, or the answer gives the nm-based check to add",
+        "Neither --allow-shlib-undefined nor -z muldefs is proposed as the fix for these static archives"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "variadic-function-gets-a-fixed-signature",
+      "prompt": "Add `fun Ev.emit(topic: String, value: ByteArray, partition: Int? = null, timestamp: Long? = null)` to the Kotlin binding in {fixture}, on top of the library's ev_emit (the header is include/ev/ev.h). Errors become exceptions.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} variadic-header",
+      "expected_output": "The implementation uses ev_emitv with an array of ev_vu_t (or a fixed-signature C shim in the .def), because ev_emit's arguments are built by macros cinterop cannot see and its vararg binding checks no types. The payload is pinned or copied for the duration of the call, and a negative return becomes an exception carrying ev_strerror's text.",
+      "expectations": [
+        "The Kotlin code calls ev_emitv, or a C function with a fixed signature added to the .def, rather than passing tag/value pairs to ev_emit's vararg binding",
+        "If ev_emit's vararg binding is used directly anyway, no Kotlin Int is passed where the C side reads size_t or int64_t",
+        "The answer states that the EV_V_* macros that take arguments are invisible to cinterop, or that the vararg binding performs no type checking",
+        "The answer does not claim that Kotlin/Native cannot call variadic C functions at all",
+        "The ByteArray is pinned (usePinned) or copied into native memory for the duration of the C call, and the ev_vu_t array is allocated in a scope that encloses the call",
+        "A negative return code becomes a thrown exception whose message includes the text from ev_strerror"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "withtimeout-does-not-bound-a-blocking-call",
+      "prompt": "The readiness probe in {fixture} (server/src/linuxX64Main/kotlin/app/Readiness.kt) is supposed to answer within 2 seconds. When the database host stops answering, Kubernetes reports the probe timing out after 10 seconds instead of getting a 'not ready' answer. Fix it, and say how to verify the fix.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} blocking-probe",
+      "expected_output": "withTimeoutOrNull cannot end db_ping: cancellation is cooperative and the thread is inside a blocking C call, so the timed block waits for its child. The fix bounds the answer by awaiting a call that is not a child of the timed block, keeps at most one ping in flight on the single db handle so repeated probes do not pile up blocked pings, and bounds the thread with db_set_timeout_ms. Verification times the probe with the database unreachable.",
+      "expectations": [
+        "The answer states that withTimeout/withTimeoutOrNull cannot interrupt a blocking C call, because cancellation only takes effect at suspension points",
+        "The fixed code returns within the 2-second budget by awaiting the ping from a coroutine that is not a child of the timed block (a separate scope, async/await) or by an equivalent construct",
+        "The fix calls db_set_timeout_ms (or states that it must be set) so the blocked thread itself comes back",
+        "With the database unreachable, repeated probe calls do not each start a new db_ping on the single db handle: the code keeps at most one ping in flight (for example by reusing an in-flight Deferred)",
+        "The answer does not claim that switching dispatchers, by itself, makes the blocking call cancellable",
+        "The verification measures how long the probe takes to answer with the database unreachable, not only which status code it returns"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "static-binary-needs-more-than-the-binary",
+      "prompt": "The static image built by {fixture}/Dockerfile starts and answers /health, but the first page behind login fails — see smoke.log. Fix the image so the service works, and change how we test images so this cannot ship again.",
+      "files": [
+        "evals/files/setup-fixture.sh"
+      ],
+      "setup": "evals/files/setup-fixture.sh {fixture} static-scratch",
+      "expected_output": "A static glibc binary still loads iconv's gconv converters with dlopen, and Ktor's charset layer on Kotlin/Native goes through iconv. Either the whole gconv directory, libc.so.6, the loader and ld.so.cache are copied from the build stage, or kotlin-native-rt's iconv-unicode is linked. CA certificates are added for the outbound HTTPS through ktor-client-curl. The smoke test reaches a route that goes through a charset, not /health.",
+      "expectations": [
+        "The answer states that glibc's iconv loads gconv modules with dlopen even from a statically linked binary",
+        "The fix either copies the gconv directory together with libc.so.6, the dynamic loader and /etc/ld.so.cache, or links kotlin-native-rt's iconv-unicode",
+        "Any glibc files the fix copies come from the build stage (COPY --from=build), not from the host or from a different image",
+        "The fix does not copy a single gconv module such as UTF-16.so instead of the directory",
+        "The image gains a CA bundle at /etc/ssl/certs/ca-certificates.crt, with the reason given as ktor-client-curl's outbound HTTPS",
+        "The proposed image test requests a route whose handling goes through a charset conversion (a rendered page or an encoded parameter), not only /health or a 401"
+      ]
+    }
+  ]
+}

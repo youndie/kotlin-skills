@@ -363,6 +363,13 @@ report a task up to date while the XML is from the previous run.
 - **A library-style server** (several distributions, two engines): a composition-root function
   with lambdas, an isolated `koinApplication` instead of the global `startKoin`, dependencies
   handed to routes explicitly. Same file.
+- **An MCP endpoint for agents**: `installKoreMcp(KoreMcpConfig(token, allowedHosts), serverInfo) {
+  addTool(…) }` from kore's `kore-mcp` (kore 0.1.14+), not a hand-written interceptor. No token
+  installs nothing; the guard sits on the transport's own route, because a path-string check in an
+  application interceptor and the router can disagree about which requests reach the transport;
+  `Bearer` only, compared in constant time, JSON 401/400 instead of a login redirect; `Host` checked
+  when hosts are configured. Install the application's ContentNegotiation first. Text from untrusted
+  sources handed back to an agent is screened with its `HiddenCharacters`; domain rules stay here.
 - **OpenAPI from routes**: Ktor's route description DSL (`describe { }`, Ktor 3.3+ with the
   Ktor compiler plugin for inference) with small project helpers for headers and bodies; the
   committed spec is regenerated in the same change and CI fails on a diff. Two traps: one
