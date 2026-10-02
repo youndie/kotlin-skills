@@ -8,7 +8,7 @@ description: "Lay out or restructure a Kotlin Multiplatform project: Gradle modu
 The shape below is the one that works when the same code has to run in several places at once:
 a Compose client on Android, iOS, desktop and the browser; a Ktor server compiled both to the
 JVM and to a native Linux binary; and one contract shared by all of them. The reference
-implementation is [mani](https://github.com/youndie/mani-kotlin-fullstack). Where a rule is
+implementation is [mani](https://github.com/youndie/mani). Where a rule is
 specific to that product, this file says so; everything else transfers.
 
 ## Step 0. Check the project first

@@ -5,7 +5,7 @@ shared wire contract, Ktor servers compiled to the JVM and to Kotlin/Native, Com
 clients, the testing that holds all of it together, and the naming and abstraction conventions
 underneath.
 
-Two sources, plus one tool. The public source is [mani](https://github.com/youndie/mani-kotlin-fullstack): a
+Two sources, plus one tool. The public source is [mani](https://github.com/youndie/mani): a
 budget planner with a Compose client for Android, iOS, desktop and the browser, one server
 compiled twice, and one contract module shared by all of them; its code is the reference for the
 two-build mechanics, the contract and the platform plumbing. The larger patterns (use cases with
@@ -50,6 +50,16 @@ A second plugin, `research-method`, holds what is not about Kotlin:
 |---|---|
 | [`measurement-study`](plugins/research-method/skills/measurement-study/SKILL.md) | running a time-boxed study, spike or measurement campaign — or one measurement inside a product backlog item — so that its verdicts survive review: a pre-registered brief frozen by script, a pinned stand, positive controls, a ruler, interleaved arms, a verdict per question with every number traceable to its log |
 
+### Plugins that live in their own repositories
+
+A skill that belongs to one library lives in that library's repository, next to the code it
+describes and the tools it runs, and changes in the same pull request as that code. The marketplace
+lists it with a `github` source; its version and its checks are kept there, not here.
+
+| Plugin | Skill | Use it when |
+|---|---|---|
+| [`kompot`](https://github.com/youndie/kompot) | [`kompot-layout`](https://github.com/youndie/kompot/blob/main/skills/kompot-layout/SKILL.md) | laying out or restyling a screen on kompot's server-driven UI: the component tree on the server, a new wire type and its renderer, a design canvas matched against the frame, a change priced as a server deploy or a client release |
+
 How they relate:
 
 ```
@@ -89,6 +99,10 @@ claude plugin install kotlin-fullstack@kotlin-skills
 claude plugin install research-method@kotlin-skills
 ```
 
+```bash
+claude plugin install kompot@kotlin-skills
+```
+
 The skills then appear as `/kotlin-fullstack:<skill>` and trigger on their own when a task
 matches. If you already have personal skills with the same names, the plugin namespace keeps
 them apart, but Claude picks between two matching descriptions by description alone; retire or
@@ -103,7 +117,7 @@ for s in plugins/kotlin-fullstack/skills/*; do ln -s "$(pwd)/$s" ~/.claude/skill
 ## Layout
 
 ```
-.claude-plugin/marketplace.json          the marketplace: two plugins
+.claude-plugin/marketplace.json          the marketplace: two plugins here, one fetched from its own repository
 plugins/kotlin-fullstack/
   .claude-plugin/plugin.json
   skills/<name>/SKILL.md                 the skill (400 lines at most)
@@ -124,6 +138,7 @@ scripts/check_plugin.py                  what CI holds every change to
   (`scripts/check_plugin.py --base`) refuses the pull request otherwise; only `evals/` is exempt.
   The same script holds the 400-line budget, the description limit, the frontmatter name and every
   relative link inside a skill — `python3 scripts/check_plugin.py --base origin/main` runs it locally.
+  A plugin listed from its own repository is skipped: its repository holds it to the same rule.
 - A rule without a reason is not written down. Where the reason is a defect, the defect is
   described.
 - Nothing here describes a particular machine. A quirk that does not reproduce in CI is not a

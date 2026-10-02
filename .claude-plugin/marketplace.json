@@ -3,6 +3,7 @@
   "owner": {
     "name": "youndie"
   },
+  "description": "Claude Code skills for Kotlin full-stack work, for running studies whose verdicts survive review, and for laying out screens on kompot.",
   "plugins": [
     {
       "name": "kotlin-fullstack",
@@ -13,6 +14,14 @@
       "name": "research-method",
       "source": "./plugins/research-method",
       "description": "A study, spike or measurement campaign whose verdicts survive review: pre-registration frozen by script, pinned stand, positive controls, a measured ruler, interleaved arms, a verdict per question with every number traceable to its log."
+    },
+    {
+      "name": "kompot",
+      "source": {
+        "source": "github",
+        "repo": "youndie/kompot"
+      },
+      "description": "Laying out a screen on kompot, a Kotlin server-driven UI toolkit: the component tree on the server, wire types and their renderers, a design canvas matched against the rendered frame, and every change priced as a server deploy or a client release. Lives in the kompot repository, with the canvas tools the skill runs."
     }
   ]
 }

@@ -5,7 +5,7 @@ description: "Naming, abstraction and commenting conventions for Kotlin/KMP/Ktor
 
 # Kotlin conventions: names, abstractions, comments
 
-The client and contract rows come from [mani](https://github.com/youndie/mani-kotlin-fullstack),
+The client and contract rows come from [mani](https://github.com/youndie/mani),
 where one root package spans a contract module, two server builds and a four-platform client;
 the server and larger-client rows from services with tenancy and roles, written generically. Each
 carries its reason so the next reader can tell a rule from a habit.

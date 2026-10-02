@@ -7,7 +7,7 @@ description: "Add or change a route, use case, repository, worker or DI binding 
 
 Versions assumed: Kotlin 2.2+, Ktor 3.x, Koin 4.x. The shape is what several Ktor services
 converged on; the public reference for the two-build mechanics is
-[mani](https://github.com/youndie/mani-kotlin-fullstack), and where the reference does something
+[mani](https://github.com/youndie/mani), and where the reference does something
 older than this file, the file says so. Every rule names the defect that paid for it.
 
 ## Step 0. Check the project first
