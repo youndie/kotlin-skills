@@ -275,6 +275,14 @@ whatever `req` was; their green neighbours pass. And around it:
   is nothing to wait for. Rebase, regenerate the index, push, and wait again.
 - **Green on an old base is not green**, which is what `behind` is for: when the default branch
   has moved since the head was cut, rebase and let the checks run on what will actually merge.
+- **A `workflow_dispatch` on the branch leaves the required checks `skipped`.** A workflow that
+  also runs on dispatch reports its jobs under the same names, and those gated to `push` or
+  `pull_request` finish `skipped` — newer than the real runs, so `latest` reads them and the gate
+  refuses `check=skipped`. That refusal is right, and dropping the name from `req` is loosening.
+  Make a real run the newest again: rerun the pull-request run (`gh run list --commit "$sha"
+  --event pull_request` names it, `gh run rerun <id>`) or push a commit, then gate again. Seen on
+  a branch dispatched to try a weekly job: refused between the dispatch and the rerun, green on
+  either side of them.
 - **The waiter only reads.** A background job that switches branches is a second pair of hands in
   the same working tree; the next commit lands wherever it left `HEAD`.
 - **Red is a finding, never a reason to loosen.** Fix it on the branch inside the item's scope,
