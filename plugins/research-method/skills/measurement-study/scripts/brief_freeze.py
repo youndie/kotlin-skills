@@ -33,6 +33,15 @@ What it guards, and how:
   descend from the freeze and be a different commit: a freeze made together with the first number
   cannot show that it came first. A shallow clone and a missing DIR are refused, not passed.
 
+* **A study that adopts the record after it began.** Its frozen file was committed, and held by some
+  other means, before this line existed, so the record's first appearance comes after every
+  measurement and `--window` could only fail. An optional fifth key, `since=<full commit id>`, names
+  the commit from which the recorded bytes have stood; `--record PATH --since REV` writes it and
+  refuses a commit whose bytes differ. `--history` then checks the bytes in that commit and in every
+  later one that held the file, and closes the window there: a study that froze before it measured
+  can show it, and one that did not is told so. The anchor must be an ancestor of the commit that
+  first recorded it, and, like the rest of the record, it can never be moved afterwards.
+
 * **Its own ability to fail.** `--control` builds small trees that must fail each rule and must pass
   the legitimate edits, then mutates this repository's own frozen files in memory. One of the three
   copies carried a control case whose mutation searched for a heading its wrapper did not contain:
@@ -46,7 +55,8 @@ What it guards, and how:
     brief_freeze.py                            check every record in BRIEF.md
     brief_freeze.py --history --window logs    the record and the bytes never moved, frozen before logs/
     brief_freeze.py --control                  prove that each rule fires
-    brief_freeze.py --record PATH [--whole]    print the record line to paste into BRIEF.md
+    brief_freeze.py --record PATH [--whole] [--since REV]
+                                               print the record line to paste into BRIEF.md
 
 `make check` runs the first three; CI needs the whole history (`fetch-depth: 0`). Keep the frozen
 file out of line-ending conversion (`<path> -text` in .gitattributes), or a checkout that rewrites
@@ -69,6 +79,7 @@ from pathlib import Path, PurePosixPath
 MARKER = b"<!-- ---8<--- everything after this line is the received text, byte for byte ---8<--- -->\n"
 RECORD = re.compile(r"<!--\s*frozen:(?P<body>.*?)-->")
 FIELDS = ("path", "bytes", "sha256", "scope")
+OPTIONAL = ("since",)
 SCOPES = ("after-marker", "whole")
 GIT_IDENTITY = ["-c", "user.name=freeze", "-c", "user.email=freeze@example.invalid",
                 "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"]
@@ -94,8 +105,8 @@ def parse_records(text: str, where: str) -> list[dict[str, str]]:
         fields: dict[str, str] = {}
         for token in m.group("body").split():
             key, sep, value = token.partition("=")
-            if not sep or key not in FIELDS:
-                raise Refusal(f"{where}: {token!r} is not one of {', '.join(FIELDS)} in {m.group(0)}")
+            if not sep or key not in FIELDS + OPTIONAL:
+                raise Refusal(f"{where}: {token!r} is not one of {', '.join(FIELDS + OPTIONAL)} in {m.group(0)}")
             if key in fields:
                 raise Refusal(f"{where}: {key} appears twice in {m.group(0)}; which value holds is ambiguous")
             fields[key] = value
@@ -107,6 +118,9 @@ def parse_records(text: str, where: str) -> list[dict[str, str]]:
         if not re.fullmatch(r"[0-9a-f]{64}", fields["sha256"]) or not fields["bytes"].isdigit():
             raise Refusal(f"{where}: {m.group(0)} does not carry a sha256 and a byte count; "
                           f"run --record on the file instead of writing the line by hand")
+        if "since" in fields and not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", fields["since"]):
+            raise Refusal(f"{where}: since={fields['since']!r} is not a full commit id; "
+                          f"run --record with --since instead of writing it by hand")
         if int(fields["bytes"]) == 0:
             raise Refusal(f"{where}: {m.group(0)} freezes an empty text, and a check over nothing passes")
         fields["path"] = repo_path(fields["path"], where)
@@ -182,7 +196,7 @@ def check(root: Path, brief: str, quiet: bool = False) -> list[str]:
     return errors
 
 
-def record_line(root: Path, path: str, whole: bool) -> str:
+def record_line(root: Path, path: str, whole: bool, since: str | None = None) -> str:
     rel = repo_path(path, "--record")
     target = root / rel
     if not target.is_file():
@@ -191,7 +205,21 @@ def record_line(root: Path, path: str, whole: bool) -> str:
     body = frozen_bytes(target.read_bytes(), scope, rel)
     if not body:
         raise Refusal(f"{rel}: nothing to freeze - the frozen text is empty")
-    return f"<!-- frozen: path={rel} bytes={len(body)} sha256={hashlib.sha256(body).hexdigest()} scope={scope} -->"
+    anchor = ""
+    if since is not None:
+        resolved = git(root, "rev-parse", "--verify", "--quiet", f"{since}^{{commit}}")
+        if resolved.returncode != 0:
+            raise Refusal(f"--since {since}: not a commit in this repository")
+        commit = resolved.stdout.strip()
+        blob = git(root, "show", f"{commit}:{rel}", binary=True)
+        if blob.returncode != 0:
+            raise Refusal(f"--since {since}: {rel} is not in that commit")
+        if frozen_bytes(blob.stdout, scope, f"{rel}@{commit[:7]}") != body:
+            raise Refusal(f"--since {since}: the frozen bytes in that commit differ from the file as it is now; "
+                          f"name the commit from which these exact bytes have stood")
+        anchor = f" since={commit}"
+    return (f"<!-- frozen: path={rel} bytes={len(body)} sha256={hashlib.sha256(body).hexdigest()} "
+            f"scope={scope}{anchor} -->")
 
 
 # --- the history ----------------------------------------------------------------------------------
@@ -260,6 +288,11 @@ def history(root: Path, brief: str, window: str | None, quiet: bool = False) -> 
             first.setdefault(path, (c, r))
 
     for path, (since, record) in first.items():
+        anchor = record.get("since", since)
+        if anchor != since and not ancestor(root, anchor, since):
+            errors.append(f"the record for {path} says since={anchor[:7]}, which is not an ancestor of "
+                          f"{since[:7]}, where it was first recorded (or not a commit here at all)")
+            anchor = since
         for c, recs in versions:
             if c == since or not ancestor(root, since, c):
                 continue
@@ -274,32 +307,39 @@ def history(root: Path, brief: str, window: str | None, quiet: bool = False) -> 
             errors.append(f"the record for {path} was rewritten in the working tree (first recorded at {since[:7]})")
 
         checked = 0
-        for c in [since, *touching(root, f"{since}..HEAD", "--", path)]:
-            if c != since and not ancestor(root, since, c):
+        for c in [anchor, *touching(root, f"{anchor}..HEAD", "--", path)]:
+            if c != anchor and not ancestor(root, anchor, c):
                 continue
             blob = git(root, "show", f"{c}:{path}", binary=True)
             if blob.returncode != 0:
-                errors.append(f"{path} is recorded as frozen at {since[:7]} and absent at {c[:7]}")
+                errors.append(f"{path} is recorded as frozen at {anchor[:7]} and absent at {c[:7]}")
                 continue
             error = verify(record, blob.stdout, f"{path}@{c[:7]}")
             if error:
                 errors.append(error)
             checked += 1
         if not quiet:
-            print(f"{path}: recorded at {since[:7]}; the same bytes in all {checked} commit(s) that held it since")
+            frozen = f", frozen since {anchor[:7]}" if anchor != since else ""
+            print(f"{path}: recorded at {since[:7]}{frozen}; the same bytes in all {checked} commit(s) "
+                  f"that held it since")
 
         if window:
             found = measurements(root, window)
+            late = 0
             for c, added in found:
-                if c == since:
+                if c == anchor:
                     errors.append(f"{path} was frozen in the same commit {c[:7]} that added {added}: a freeze "
                                   f"made with the first number cannot show that it came first")
-                elif not ancestor(root, since, c):
-                    errors.append(f"{path} was frozen at {since[:7]}, but {c[:7]} added {added} without it: "
+                elif not ancestor(root, anchor, c):
+                    errors.append(f"{path} was frozen at {anchor[:7]}, but {c[:7]} added {added} without it: "
                                   f"the window closes at the first measurement")
+                else:
+                    continue
+                late += 1
             if not quiet:
-                print(f"{path}: frozen at {since[:7]}, before all {len(found)} commit(s) adding measurements under "
-                      f"{window}" if found else f"{window}: no measurement committed yet, so the window is open")
+                print(f"{path}: frozen at {anchor[:7]}, before {len(found) - late} of the {len(found)} commit(s) "
+                      f"adding measurements under {window}" if found
+                      else f"{window}: no measurement committed yet, so the window is open")
     return errors
 
 
@@ -436,6 +476,8 @@ def control(root: Path, brief: str, verbose: bool = False) -> int:
     case("a path outside the repository fails", "not a path inside the repository",
          lambda d: plain(d, records=f"<!-- frozen: path=../outside.md bytes=1 sha256={sha} scope=whole -->"))
     case("recording a missing file is refused", "no such file", lambda d: record_line(d, "missing.md", False))
+    case("a since that is not a full commit id fails", "not a full commit id",
+         lambda d: with_record(d, lambda line: line.replace(" -->", " since=abc1234 -->")))
 
     if shutil.which("git") is None:
         results.append(("the history rules", False, "git is not installed, so they cannot be shown to fire"))
@@ -584,6 +626,94 @@ def control(root: Path, brief: str, verbose: bool = False) -> int:
                 raise _Invalid(f"could not make a shallow clone to test with: {cloned.stderr.strip()}")
             return hist(d / "clone")
 
+        # A study that froze its text by other means and adopts the record later: `since` anchors it.
+        def head(d: Path) -> str:
+            return git(d, "rev-parse", "HEAD").stdout.strip()
+
+        def adopted(d: Path, order: str) -> list[str]:
+            d.mkdir(parents=True, exist_ok=True)
+            git(d, "init", "-q")
+            (d / "logs").mkdir()
+            (d / "logs" / "README.md").write_text("What the logs are.\n")
+            _commit(d, "a README under logs/ is not a measurement")
+            if order == "log-first":
+                (d / "logs" / "first.log").write_text("a number\n")
+                _commit(d, "first measurement")
+            target = d / BRIEF_PATH
+            if order == "anchor-differs":
+                _tree(d, records="Held by another mechanism.")
+                target.write_bytes(_mutate(target.read_bytes(), "flip"))
+                _commit(d, "a text that is not the one frozen later")
+                anchor = head(d)
+            _tree(d, records="Held by another mechanism.")
+            _commit(d, "freeze the text, the digest kept elsewhere")
+            if order != "anchor-differs":
+                anchor = head(d)
+            if order == "edited-between":
+                original = target.read_bytes()
+                target.write_bytes(_mutate(original, "flip"))
+                _commit(d, "move a threshold")
+                target.write_bytes(original)
+                _commit(d, "and move it back")
+            if order == "side-branch":
+                main = git(d, "symbolic-ref", "--short", "HEAD").stdout.strip()
+                git(d, "checkout", "-q", "-b", "side")
+                (d / "notes.md").write_text("a side note\n")
+                _commit(d, "a commit main never merges")
+                anchor = head(d)
+                git(d, "checkout", "-q", main)
+            if order != "log-first":
+                (d / "logs" / "first.log").write_text("a number\n")
+                _commit(d, "first measurement")
+            if order in ("anchor-differs", "side-branch"):    # --record would refuse or cannot see it
+                line = record_line(d, BRIEF_PATH, False).replace(" -->", f" since={anchor} -->")
+            else:
+                line = record_line(d, BRIEF_PATH, False, since=anchor)
+            (d / "BRIEF.md").write_text(f"# BRIEF\n\n{line}\n", encoding="utf-8")
+            _commit(d, "adopt the record after the study began")
+            return hist(d, "logs")
+
+        def adopted_unanchored(d: Path) -> list[str]:
+            d.mkdir(parents=True, exist_ok=True)
+            git(d, "init", "-q")
+            _tree(d, records="Held by another mechanism.")
+            (d / "logs").mkdir()
+            _commit(d, "freeze the text, the digest kept elsewhere")
+            (d / "logs" / "first.log").write_text("a number\n")
+            _commit(d, "first measurement")
+            (d / "BRIEF.md").write_text(f"# BRIEF\n\n{record_line(d, BRIEF_PATH, False)}\n", encoding="utf-8")
+            _commit(d, "adopt the record without saying since when")
+            return hist(d, "logs")
+
+        def record_since_differs(d: Path) -> list[str]:
+            d.mkdir(parents=True, exist_ok=True)
+            git(d, "init", "-q")
+            _tree(d, records="Not frozen yet.")
+            target = d / BRIEF_PATH
+            target.write_bytes(_mutate(target.read_bytes(), "flip"))
+            _commit(d, "a draft")
+            first = head(d)
+            _tree(d, records="Not frozen yet.")
+            _commit(d, "the text as frozen")
+            return [record_line(d, BRIEF_PATH, False, since=first)]
+
+        def moved_anchor(d: Path) -> list[str]:
+            d.mkdir(parents=True, exist_ok=True)
+            git(d, "init", "-q")
+            _tree(d, records="Held by another mechanism.")
+            _commit(d, "freeze the text")
+            entered = head(d)
+            (d / "notes.md").write_text("later\n")
+            _commit(d, "something else")
+            later = head(d)
+            (d / "BRIEF.md").write_text(f"# BRIEF\n\n{record_line(d, BRIEF_PATH, False, since=entered)}\n",
+                                        encoding="utf-8")
+            _commit(d, "adopt the record")
+            (d / "BRIEF.md").write_text(f"# BRIEF\n\n{record_line(d, BRIEF_PATH, False, since=later)}\n",
+                                        encoding="utf-8")
+            _commit(d, "move the anchor")
+            return hist(d)
+
         case("an untouched history passes", None, lambda d: hist(repo(d)))
         case("text and record rewritten in one commit fail the history", "was rewritten at", rewritten)
         case("text and record rewritten, not yet committed, fail the history", "rewritten in the working tree",
@@ -603,6 +733,18 @@ def control(root: Path, brief: str, verbose: bool = False) -> int:
         case("a --window naming no directory is refused", "no such directory",
              lambda d: history(repo(d), "BRIEF.md", "log", quiet=True))
         case("a shallow clone is refused, not passed", "shallow clone", shallow)
+        case("a record adopted after the first log, without since, fails --window", "the window closes",
+             adopted_unanchored)
+        case("a record adopted later, since the commit that froze the text before any log, passes --window", None,
+             lambda d: adopted(d, "freeze-first"))
+        case("a since after the first log fails --window", "the window closes", lambda d: adopted(d, "log-first"))
+        case("a since whose bytes differ fails the history", changed, lambda d: adopted(d, "anchor-differs"))
+        case("an edit made and undone between since and the record fails the history", changed,
+             lambda d: adopted(d, "edited-between"))
+        case("a since that is not an ancestor of the record fails the history", "not an ancestor",
+             lambda d: adopted(d, "side-branch"))
+        case("a since moved after it was recorded fails the history", "was rewritten at", moved_anchor)
+        case("recording since a commit whose bytes differ is refused", "differ from the file", record_since_differs)
 
     # This repository's own frozen files, mutated in memory: the control of the real thing.
     own = root / brief
@@ -649,6 +791,8 @@ def main() -> int:
     mode.add_argument("--record", metavar="PATH", help="print the record line for PATH")
     parser.add_argument("--window", metavar="DIR", help="with --history: the freeze must predate every measurement under DIR")
     parser.add_argument("--whole", action="store_true", help="with --record: hash the whole file, no marker")
+    parser.add_argument("--since", metavar="REV", help="with --record: the commit from which these bytes have "
+                                                       "stood, for a study adopting the record after it began")
     parser.add_argument("-v", "--verbose", action="store_true", help="with --control: say why each case came out as it did")
     args = parser.parse_args()
     root = Path(args.root)
@@ -656,11 +800,13 @@ def main() -> int:
         parser.error("--window goes with --history")
     if args.whole and not args.record:
         parser.error("--whole goes with --record")
+    if args.since and not args.record:
+        parser.error("--since goes with --record")
     try:
         if args.control:
             return control(root, args.brief, args.verbose)
         if args.record:
-            print(record_line(root, args.record, args.whole))
+            print(record_line(root, args.record, args.whole, args.since))
             return 0
         errors = history(root, args.brief, args.window) if args.history else check(root, args.brief)
     except Refusal as e:

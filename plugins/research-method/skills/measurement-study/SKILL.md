@@ -100,6 +100,10 @@ could move it (pgo-native-spike@7bd8918:BRIEF.md, "The brief as received"). Why 
 gate: the plain check passes a text edited together with its record in one commit. Copy the script
 into `scripts/`, keep `docs/research/source-brief.md -text` in `.gitattributes`, and merge study
 branches rather than squash them — a squash keeps no trace of an edit made and undone on the branch.
+A study that adopts the script after it began — the frozen file committed earlier, its digest kept in
+prose or in a copied script — records with `--record PATH --since <the commit that added those
+bytes>`: `--history` checks the bytes from that commit and closes the window there, so a freeze that
+came first can show it, and one that did not is reported rather than re-dated.
 
 **The window.** Amendments are allowed until the first measurement — appended to BRIEF.md, dated,
 each with the evidence that forced it; nothing is edited away. Then the rule three of the four
