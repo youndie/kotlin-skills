@@ -8,7 +8,7 @@ description: "Design or change the wire contract between a Ktor server and Kotli
 One module, compiled into every client target and every server build, holds **the description of
 what the two sides exchange**. Its property, and the reason it exists: you cannot rename a path or
 a field on one side and forget the other, because there is only one side. The reference
-implementation is `:shared` in [mani](https://github.com/youndie/mani-kotlin-fullstack).
+implementation is `:shared` in [mani](https://github.com/youndie/mani).
 
 ## Step 0. Check the project first
 

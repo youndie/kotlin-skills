@@ -8,7 +8,7 @@ description: "Add or change a screen or feature in a Compose Multiplatform clien
 Unidirectional data flow: **domain flows and use cases → a view model that derives one immutable
 `UiState` → a stateless Content that renders it and sends `UiAction`s back**. Navigation and
 one-shot effects leave the view model as `UiEvent`s. Public reference for the platform mechanics
-(navigation, session, offline): [mani](https://github.com/youndie/mani-kotlin-fullstack); the
+(navigation, session, offline): [mani](https://github.com/youndie/mani); the
 view-model shape below is the one that scales past a dozen screens, and the reference's older
 screens are the counter-example where noted.
 

@@ -1,7 +1,7 @@
 {
   "name": "kotlin-fullstack",
   "description": "Kotlin full-stack skills distilled from a real Kotlin Multiplatform product: a product brief that feeds docs-bootstrap and a designer, a backlog loop that turns one item into one pull request, project structure, shared wire contract, Ktor server (JVM + Kotlin/Native), standing up a new Kotlin/Native service from nothing to a deployed image, Compose Multiplatform client, design-to-Compose parity with viddik, testing, conventions, releasing a KMP library through sborka and proba, and binding a C library into Kotlin/Native.",
-  "version": "0.9.0",
+  "version": "0.9.1",
   "author": {
     "name": "youndie"
   },

@@ -8,7 +8,7 @@ description: "Write, place and run tests in a Kotlin Multiplatform project with 
 One source tree builds several artefacts: clients for four platforms and a server compiled twice.
 That is what makes testing here different from the usual: **shared code does not have one test
 suite**, and where a test lives is decided by the platforms it must run on. The reference is
-`docs/TESTING.md` in [mani](https://github.com/youndie/mani-kotlin-fullstack); the server-side
+`docs/TESTING.md` in [mani](https://github.com/youndie/mani); the server-side
 traps come from larger services and are written generically.
 
 Map: the first half is common and server (stack, placement, naming, fakes, storage, two builds);
