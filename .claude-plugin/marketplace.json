@@ -18,8 +18,8 @@
     {
       "name": "kompot",
       "source": {
-        "source": "github",
-        "repo": "youndie/kompot"
+        "source": "url",
+        "url": "https://github.com/youndie/kompot.git"
       },
       "description": "Laying out a screen on kompot, a Kotlin server-driven UI toolkit: the component tree on the server, wire types and their renderers, a design canvas matched against the rendered frame, and every change priced as a server deploy or a client release. Lives in the kompot repository, with the canvas tools the skill runs."
     }

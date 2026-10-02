@@ -54,7 +54,8 @@ A second plugin, `research-method`, holds what is not about Kotlin:
 
 A skill that belongs to one library lives in that library's repository, next to the code it
 describes and the tools it runs, and changes in the same pull request as that code. The marketplace
-lists it with a `github` source; its version and its checks are kept there, not here.
+lists it by the repository's `https://` address (a `url` source), so an install needs no SSH set up
+for GitHub; its version and its checks are kept there, not here.
 
 | Plugin | Skill | Use it when |
 |---|---|---|
