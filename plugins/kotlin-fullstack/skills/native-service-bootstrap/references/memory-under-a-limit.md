@@ -75,9 +75,14 @@ and keeps the other arms selectable by a property so the choice can be re-run ra
 with headroom under its limit gives back a fifth of its CPU for nothing. **The SQLite warning above
 is katcher's, not SQLite's**: xyk also has SQLite on the request path, and there the system
 allocator was the arm that lived — the shape of the load decided, which is the point of measuring.
-And **the `MALLOC_ARENA_MAX=2` hazard below was measured on `-Xallocator=std` only**; nobody has
-measured it on `pagedAllocator=false`, so an image that ships both measures the pair, with the
-positive control.
+And **the `MALLOC_ARENA_MAX=2` hazard below did not transfer to `pagedAllocator=false` on xyk**,
+measured against a frozen pre-registration ([arena-cap.md](https://github.com/youndie/xyk/blob/21c5252/docs/research/measurements-2026-10-02/arena-cap.md)): at 64 MiB no kill in 48 capped
+runs at the light and the declared load, the uncapped arm surviving as well; the cap cut glibc
+heaps from 54–136 to 0–1 and left a third less anonymous memory (30 against 50 MB at 200
+connections, an exploratory `memory.stat` column); CPU per request and latency showed nothing
+distinguishable (+1.7 % [−1.7, +5.2]). `memory.peak` could not separate the arms at all — under the
+limit both sit on it, under a roomy one it is page cache. One service, so an image that ships the
+pair elsewhere still measures it, with the positive control.
 
 **The counter-case: a heap of gigabytes on a few threads wants 256 KiB, and pays for 16 in pause.**
 Everything above is a service with many threads and a heap of tens of megabytes, where the pages
