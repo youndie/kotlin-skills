@@ -94,12 +94,19 @@ the same question in a `doFirst` on every publish task. sborka's conventions do 
 while `0.2.0` is released, the snapshots that follow come out as `0.1.0.N` — sorting below the
 release while carrying newer code (chronik raised it first, B-18). And in Maven ordering `X.Y.Z.N`
 sorts **above** `X.Y.Z`: a consumer on a snapshot of the line is never offered the release as an
-upgrade. A `-SNAPSHOT` head is a legitimate default for a build that is never given `-PVERSION`
-(sborka's fallback; mongkn keeps one so that such a build cannot look like a release), but
-`determine-version` appends the run number to whatever head it reads — kontainer's first publish
-went out as `0.1.0-SNAPSHOT.1` (kontainer `e18d6bb`). **Where `determine-version` computes the
-version, the head is a plain `X.Y.Z`**, and it lives in one place — a workflow that spells it again
-published shildik 0.4.1's sources as `0.4.0.20` (shildik `b0ea2ff`).
+upgrade. **Where `determine-version` computes the version, the head is a plain `X.Y.Z`.** The
+action puts the run number on the tail of whatever head it reads, so it refuses a head ending in
+`-SNAPSHOT` (in any case) and its error names the `X.Y.Z` to set (sborka
+[#125](https://github.com/youndie/sborka/pull/125)); before that check kontainer's first publish
+went out on a green run as `0.1.0-SNAPSHOT.1` — neither a numbered snapshot nor a release, and not
+a Maven snapshot either, which has to *end* in `-SNAPSHOT` (kontainer `e18d6bb`). A `-SNAPSHOT` head
+is still the right default for a build that is never given `-PVERSION` (sborka's fallback; mongkn
+keeps one so that such a build cannot look like a release); a repository that keeps it for that
+reason passes the whole version to `publish-wip.yaml`'s `version` input, and the action does not
+run. A workflow that computes the version itself gets no such check
+([references/divergent-setups.md](references/divergent-setups.md#the-version-head-written-twice)).
+The head lives in one place — a workflow that spells it again published shildik 0.4.1's sources as
+`0.4.0.20` (shildik `b0ea2ff`).
 
 **1b. Every module has its coordinate.** `sborka.group` is required and has no default, on purpose:
 in kompot six of eight modules once had no `group =` line and went to a group derived from the root
@@ -213,9 +220,14 @@ indistinguishable from a wrong number. Wait for the run (`gh run watch`, or
 **every** coordinate, roots and per-target modules alike. Checking one module, or the last one
 alphabetically, proves nothing about the others: the upload order is whatever order Gradle runs the
 publish tasks in (kvadrant-ui's guard met the Android task first, `483a814`). A `central.yaml` run
-lives in sborka, so its `headSha` is sborka's and its title names no library: find yours by the time
-of the dispatch and the `uploading youndie/<name> X.Y.Z` line in its log
-([examples/workflows.md](examples/workflows.md)). On Central, after Publish, the files reach
+lives in sborka, so its `headSha` is sborka's; what names the library is the run's title, built
+from the dispatch inputs — `central youndie/<name> X.Y.Z from vX.Y.Z`, and `portal …` likewise
+(sborka [#124](https://github.com/youndie/sborka/pull/124)). Find yours by that title among the
+runs created after your dispatch, not with `gh run list --limit 1`, which can be another library
+dispatched a moment earlier ([examples/workflows.md](examples/workflows.md)). The title says what
+was asked for; whether it happened is the run's conclusion. Runs dispatched before 2 October 2026
+are all titled `central`, so an older release's run is still found by its time and the
+`uploading youndie/<name> X.Y.Z` line in its log. On Central, after Publish, the files reach
 `repo1.maven.org` within minutes (about ten for appframe 0.2.0); `maven-metadata.xml` of each
 artefact listing the version is the answer, not the portal's status.
 
