@@ -215,7 +215,6 @@ fun main() {
     val config = getServerConfig()
     val db = initDb(config)                     // migrations here, before the engine
     val probes = Probes(db)                     // startup / readiness / liveness + HealthRegistry
-
     val draining = DrainGate()                  // what the refusal reads; NOT readiness
 
     val server = embeddedServer(CIO, configure = {
@@ -234,6 +233,7 @@ fun main() {
             announce(AnnounceNotReady(probes.readiness))
             drain(EngineDrain(server, DEADLINES.drain, DEADLINES.drain + 5.seconds, draining))
             consumer(queueParticipant(queue))   // finish reading what was accepted
+            consumer(checksParticipant(probes)) // the checks query the pool: stop them before it
             pool(databaseParticipant(db))       // and only then close the pool
         }
     }
@@ -258,7 +258,7 @@ there, with the kore issue behind it, is [references/kore-wiring.md](references/
 * nobody calls `HealthRegistry.start(scope)` for you — readiness stays `UNKNOWN` forever;
 * the deadlines and the chart's `terminationGracePeriodSeconds` are one number in two places;
 * participants of one stage run **concurrently** — an order between resources is a later stage;
-* `cancel()` is "told to stop" — `cancelAndJoin`, and `stopAndJoin()` on `HealthRegistry`;
+* `cancel()` is "told to stop" — `cancelAndJoin`; the checks' `stopAndJoin()` is a consumer, not telemetry;
 * `/version` is generated source — `unknown` without `.git`, `-dirty` behind `.dockerignore`.
 
 The fact to check is not "it compiled" but the transcript: `docker stop` on the container must leave

@@ -47,7 +47,14 @@ and each is a line in that `main` or that module whose reason is not visible in 
   collides with what that stage does. `cancelAndJoin` in every background loop's `stop()`. A stage
   that suddenly reports 200 µs is not healthy, it is a stage where nobody waited for anything.
   kore's `HealthRegistry` had the same defect ([youndie/kore#79](https://github.com/youndie/kore/issues/79)):
-  call `stopAndJoin()` in its participant, not the deprecated `stop()`.
+  call `stopAndJoin()` in its participant, not the deprecated `stop()`. **And register that
+  participant with `consumer(...)`, never `telemetry(...)`.** A readiness check is a statement
+  against the pool, and kore's order is consumers → pools → telemetry (`KoreStage`): telemetry runs
+  *after* the pool has closed. "Health" reads like telemetry, and two services put the stop there —
+  their check loop outlived the pool it queries, one with a comment saying the next stage closes the
+  pool ([metrik#61](https://github.com/youndie/metrik/pull/61),
+  [tracy#78](https://github.com/youndie/tracy/pull/78)). The transcript cannot show it: an empty
+  telemetry stage and a busy one both report `COMPLETED`, so read where the stop is registered.
 * **`/version` is generated source.** Kotlin/Native has neither resources nor a manifest; the plugin
   writes an object and puts it into `commonMain`. `commit` will be `unknown` wherever the build
   context has no `.git` — the usual case being `.dockerignore`. And beware: a file git **tracks**
