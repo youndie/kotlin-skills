@@ -327,8 +327,9 @@ consumer resolves. So:
   the tag is written by the run that built it.
 
 **Checkable fact:** `git rev-parse vX.Y.Z^{commit}` is the commit the sborka run checked out, the
-fix you are releasing is in `git log vX.Y.Z`, not only in `git log main`, and the first snapshot
-after the tag is `X.Y.(Z+1).<run>` (`determine-version` logs `version is …`), not `X.Y.Z.<run>`.
+fix you are releasing is in `git log vX.Y.Z`, not only in `git log main`, and before the first
+snapshot after the tag `git ls-remote --tags origin v<head>` is empty: `determine-version` refuses a
+tagged head (sborka #133) — red until it moves — and then logs `version is X.Y.(Z+1).<run>`.
 
 ## 6. Move the consumers — or hand them to Renovate on purpose
 

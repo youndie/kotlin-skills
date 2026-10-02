@@ -10,7 +10,8 @@ skill — the repository's own release path wins — applies to each.
 ```yaml
 # .github/workflows/publish.yaml — the library's side. Everything else is sborka's reusable workflow:
 # checkout, setup-kotlin, the version from determine-version (head + run number; a head ending in
-# -SNAPSHOT is refused), the check, the publish, and the proba job on what the server now serves.
+# -SNAPSHOT is refused, and so is a head already tagged v<head>), the check, the publish, and the
+# proba job on what the server now serves.
 name: publish
 
 on:
@@ -61,7 +62,8 @@ git tag -a vX.Y.Z -m "X.Y.Z" <sha> && git push origin vX.Y.Z
 #    Then, before anything else merges, the head moves past it: one pull request setting
 #    version=X.Y.(Z+1) in gradle.properties. The release does not read the head (it is built from
 #    the tag with -PVERSION=X.Y.Z), so this can go in while step 2 runs; its snapshot run logs
-#    "version is X.Y.(Z+1).<run>" — X.Y.Z.<run> would sort above the release it follows.
+#    "version is X.Y.(Z+1).<run>" — X.Y.Z.<run> would sort above the release it follows. Until it
+#    goes in, every snapshot run on main is red: determine-version refuses a head tagged v<head>.
 
 # 2. One dispatch, in sborka, where the signing key and the portal token live. The dispatch is
 #    asynchronous, so `gh run list --limit 1` straight after it can be the previous run — somebody
