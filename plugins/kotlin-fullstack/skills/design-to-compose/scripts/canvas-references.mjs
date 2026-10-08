@@ -172,7 +172,11 @@ function pngSize(file) {
   return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) }
 }
 
-const CHROME_FLAGS = ['--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--no-first-run', '--disable-extensions',
+// Chrome on Linux antialiases text in LCD subpixels by default, the Mac's renders grayscale, and a
+// Compose fixture draws grayscale: a Linux reference carried colour fringes on its text and scored
+// 4.66 % against the same artboard rendered on a Mac, 1.37 % with grayscale forced. On a Mac the flag
+// changes no byte. `--font-render-hinting=none` was measured too and changed no byte on either side.
+const CHROME_FLAGS = ['--disable-lcd-text', '--headless=new', '--disable-gpu', '--no-sandbox', '--hide-scrollbars', '--no-first-run', '--disable-extensions',
   '--force-device-scale-factor=1', '--default-background-color=ffffffff', '--virtual-time-budget=5000']
 
 function render(chrome, html, png, w, h) {

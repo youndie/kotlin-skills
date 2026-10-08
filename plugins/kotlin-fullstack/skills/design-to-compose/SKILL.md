@@ -126,6 +126,14 @@ a 390x844 PNG. The warnings that matter:
   caption in the system font: a guaranteed diff region on every run. Ask for the images, or for
   the designer to confirm that a bare tinted box is the design; report the area either way.
 
+**Text in a reference is grayscale-antialiased**, whichever machine renders it: the script passes
+`--disable-lcd-text`, because a Compose fixture draws grayscale text and Chrome on Linux defaults
+to LCD subpixel antialiasing (a Mac's Chrome does not). Without the flag, a phone artboard rendered
+on Linux scored 4.66 % against the Mac render of the same artboard, against 1.37 % with it — the
+rest is glyph rasterisation. The sign of the defect, in a reference from an older copy of the
+script or another tool: zoomed in, black text has blue on one edge and orange on the other.
+Re-render it rather than raising the tolerance.
+
 Naming, once and for all: artboard stem = `<Group>_<Name>` = viddik file stem. `Checkout_Empty`
 is `@ViddikScreenshot(group = "Checkout", name = "Empty")`; `Checkout_Empty_Dark` is the
 `darkVariant = true` entry of the same fixture (viddik appends ` Dark` to the name). Spaces and
