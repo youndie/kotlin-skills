@@ -246,10 +246,11 @@ way. Wait, then decide in `jq`, over **every** check run on the **head commit**:
 pr=<n>; req='["check","suite"]'          # checks that must have run and passed, by name
 read -r sha base <<<"$(gh pr view "$pr" --json headRefOid,baseRefName --jq '"\(.headRefOid) \(.baseRefName)"')"
 runs() { gh api "repos/{owner}/{repo}/commits/$sha/check-runs?per_page=100"; }
-# Latest run per name by completion; a run that has not completed sorts last, so a queued or running
-# run of a name blocks the wait and the verdict (a queued run's started_at is its creation time, so
-# max_by(.started_at) let a finished push run stand in for a still-queued pull_request run).
-q='def latest: .check_runs | group_by(.name) | map(max_by(.completed_at // "9999"));'
+# Latest run per check suite and name by completion: a rerun stays in its own suite and replaces its
+# failure there, while another suite's run never does. A run that has not completed sorts last, so a
+# queued or running run blocks the wait and the verdict (a queued run's started_at is its creation
+# time, so max_by(.started_at) let a finished push run stand in for a still-queued pull_request run).
+q='def latest: .check_runs | group_by([.check_suite.id, .name]) | map(max_by(.completed_at // "9999"));'
 for _ in $(seq 60); do                   # thirty minutes; past that it is a finding, not a wait
   runs | jq -e --argjson req "$req" "$q"' latest | (($req - map(.name)) | length) == 0 and all(.[]; .status == "completed")' >/dev/null && break
   sleep 30
@@ -257,7 +258,7 @@ done
 verdict=$(runs | jq -r --argjson req "$req" "$q"'
   latest as $l | ($req - ($l | map(.name))) as $missing
   | [$l[] | select(.conclusion as $c | ["success", "skipped", "neutral"] | index($c) | not)] as $bad
-  | [$l[] | select(.name as $n | $req | index($n)) | select(.conclusion != "success")] as $soft
+  | [$req[] as $n | $l | select(any(.[]; .name == $n and .conclusion == "success") | not) | .[] | select(.name == $n)] as $soft
   | if ($req | length) == 0 then "refused: no required check named"
     elif ($missing | length) > 0 then "refused: never ran \($missing)"
     elif ($bad + $soft | length) > 0 then "refused: \($bad + $soft | unique_by(.name) | map("\(.name)=\(.conclusion // .status)") | join(", "))"
@@ -269,23 +270,24 @@ echo "$verdict; behind $base by $behind"
 
 Any run that failed refuses, named in `req` or not: in an unprotected repository nobody else
 decides which checks count, and a `req` written narrowly would otherwise wave a red `build`
-through. `req` adds what must have **run** — a check that never started is not a pass — and an
-empty or misspelled `req` refuses for the same reason. `skipped` and `neutral` pass on the
-checks nobody required, as on GitHub. Tried on the two pull requests merged red: both refused,
-whatever `req` was; their green neighbours pass. And around it:
+through. `req` adds what must have **run** and passed in at least one suite — a check that never
+started is not a pass — and an empty or misspelled `req` refuses for the same reason. `skipped`
+and `neutral` pass on the checks nobody required, as on GitHub. Tried on the two pull requests
+merged red: both refused, whatever `req` was; their green neighbours pass. Runs are grouped per
+check suite because a push run and a pull_request run of one workflow report the same job
+names: grouped by name alone, youndie/haul `c6ab72f` read green, its pull_request `gradle`
+failure hidden by the push `gradle` success that completed 11 s later. And around it:
 
 - **A pull request with a conflict runs no checks at all** — `mergeable: CONFLICTING` means there
   is nothing to wait for. Rebase, regenerate the index, push, and wait again.
 - **Green on an old base is not green**, which is what `behind` is for: when the default branch
   has moved since the head was cut, rebase and let the checks run on what will actually merge.
-- **A `workflow_dispatch` on the branch leaves the required checks `skipped`.** A workflow that
-  also runs on dispatch reports its jobs under the same names, and those gated to `push` or
-  `pull_request` finish `skipped` — newer than the real runs, so `latest` reads them and the gate
-  refuses `check=skipped`. That refusal is right, and dropping the name from `req` is loosening.
-  Make a real run the newest again: rerun the pull-request run (`gh run list --commit "$sha"
-  --event pull_request` names it, `gh run rerun <id>`) or push a commit, then gate again. Seen on
-  a branch dispatched to try a weekly job: refused between the dispatch and the rerun, green on
-  either side of them.
+- **A `workflow_dispatch` on the branch is a suite of its own.** Its jobs gated to `push` or
+  `pull_request` finish `skipped` under the same names as the real runs, but in another suite, so
+  they no longer stand in for those runs: the required names pass on the real runs' success, and
+  whatever the dispatch itself ran still refuses if it failed. Nothing needs rerunning. Replayed
+  on a branch dispatched to try a weekly job: the name-only grouping refused `check=skipped`
+  between the dispatch and the rerun; per suite it is green throughout.
 - **The waiter only reads.** A background job that switches branches is a second pair of hands in
   the same working tree; the next commit lands wherever it left `HEAD`.
 - **Red is a finding, never a reason to loosen.** Fix it on the branch inside the item's scope,
