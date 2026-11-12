@@ -33,7 +33,7 @@ the client starts at "Client: view models". Read the half that applies.
 | coroutines | `kotlinx-coroutines-test` (`runTest`, `StandardTestDispatcher`, `runCurrent`) |
 | server routes | `ktor-server-test-host` (`testApplication`) — published for native targets too |
 | client networking | `ktor-client-mock` (`MockEngine`) |
-| a database for server tests | an embedded `mongod` on the JVM (flapdoodle); a containerised one for the native build |
+| a database for server tests | an embedded `mongod` on the JVM (flapdoodle); a containerised one for the native build; PostgreSQL in Testcontainers, one container per suite and a new database per test ([what that harness has to guard](../ktor-server-feature/references/jvm-postgres.md#tests-against-a-real-postgresql)) |
 | the dependency graph | a test that **resolves** every injected type from `koinApplication { }`; `koin-test`'s `verify()` only as a cheap first pass |
 | client settings | `multiplatform-settings-test` (`MapSettings`) |
 | screens | `compose.uiTest` (`runComposeUiTest`) |
@@ -245,7 +245,8 @@ fun `AccountClick should emit OpenAccount event`() = runTest(testDispatcher) {
 `viewModel.uiState.value` after `runCurrent()` returns the `initialValue` forever, because the
 upstream `combine` has not started. Collect it: `uiState.test { }`, or
 `backgroundScope.launch { viewModel.uiState.collect {} }` and then `runCurrent()` and `.value`.
-The test that "passes" against the initial value guards nothing.
+The test that "passes" against the initial value guards nothing. (A request-response screen that
+holds one `MutableStateFlow` has no such trap: `.value` after `advanceUntilIdle()` is a reading.)
 
 Wait with a loop over a condition, not with `advanceTimeBy` and a guessed number: the condition
 describes what you wait for, the number describes today's implementation. Bound the loop (an

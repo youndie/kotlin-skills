@@ -1,6 +1,6 @@
 ---
 name: compose-client-feature
-description: "Add or change a screen or feature in a Compose Multiplatform client (Android, iOS, desktop, web): domain/data/ui split, observe-and-refresh repositories, use cases, a view model whose UiState is derived with combine and stateIn plus UiFlags, UiAction in and UiEvent out, Screen/Content split, navigation, session, Koin. Use for 'add a screen', 'add a settings page', 'create a view model', 'show data from the API', 'handle logout', 'add navigation' in Compose code, dashboards included."
+description: "Add or change a screen or feature in a Compose Multiplatform client (Android, iOS, desktop, web): domain/data/ui split, observe-and-refresh repositories, use cases, a view model whose UiState is derived with combine and stateIn plus UiFlags (or held by one writer on a request-response screen), UiAction in and UiEvent out, Screen/Content split, navigation, session, Koin. Use for 'add a screen', 'add a settings page', 'create a view model', 'show data from the API', 'handle logout', 'add navigation' in Compose code, dashboards included."
 ---
 
 # A feature in a Compose Multiplatform client
@@ -132,6 +132,19 @@ Mappers are extension functions next to the repository: `Dto.toEntity()`, `Entit
 
 Optimistic writes (put the change into the source of truth before the call, roll back on
 failure) are a technique for lists the user edits in place; they live inside one repository.
+
+## UI: which shape the view model takes
+
+Ask what the screen shows. **If anything on it lives longer than the screen** — a list another
+screen edits, a preference, a local table — the state is *derived* from flows, as in the next
+section. **If everything on it is the answer to a request made for this screen** (a quote, a
+receipt, one step of a wizard) there is nothing to combine: one private `MutableStateFlow` is the
+state, written only through `update { }`, with the same `UiAction` in and `UiEvent` out. That
+second shape needs its own rules or it arrives with the habits the first one forbids: a project
+built with this skill wrote twelve such view models, all assigning `.value = .value.copy(…)`, nine
+with `throwable.message` on screen. The rules, the poll that must stop when the screen is covered,
+and the tests: [examples/request-response-screen.md](examples/request-response-screen.md). The
+day a second source appears the screen moves to the derived shape; one view model never mixes them.
 
 ## UI: the view model derives, it does not mutate
 
@@ -369,7 +382,7 @@ default for every feature. [examples/network-and-session.md](examples/network-an
 
 - [ ] `domain` has the models, the repository interface (observe + refresh) and the use cases; `ui` depends on `domain` only
 - [ ] transport errors mapped to `AppError` at the repository; nothing above knows the HTTP client
-- [ ] `UiState` derived by `combine` + `stateIn`; no `state.value =`; preferences and selections are flows in the combine
+- [ ] `UiState` derived by `combine` + `stateIn`, preferences and selections as flows in it — or, for a request-response screen, one private `MutableStateFlow` written only through `update { }`; no `state.value =` either way
 - [ ] `UiFlags` for loading / error / visibility, updated with `update { }`
 - [ ] one `onAction(UiAction)` in, one `events: Flow<UiEvent>` out; navigation only through events
 - [ ] a `UiMapper` with a test; errors as `UiText`
@@ -383,5 +396,5 @@ Dependencies the snippets assume: `koin-compose-viewmodel` (`koinViewModel`, `vi
 `kotlinx-collections-immutable`, `kotlinx-coroutines-core`.
 
 Examples: [examples/feature-skeleton.md](examples/feature-skeleton.md) (domain, data, view
-model, state, screen, mapper), [examples/navigation.md](examples/navigation.md),
-[examples/network-and-session.md](examples/network-and-session.md).
+model, state, screen, mapper), [examples/request-response-screen.md](examples/request-response-screen.md),
+[examples/navigation.md](examples/navigation.md), [examples/network-and-session.md](examples/network-and-session.md).

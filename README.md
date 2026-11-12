@@ -15,8 +15,10 @@ each rule named next to it. Where a rule is specific to one product, the skill s
 Three more public services are built on this stack and are cited where a rule came from one of
 them: [shashki](https://github.com/youndie/shashki) and [konekt](https://github.com/youndie/konekt)
 (use cases, `@Resource` paths and typed errors on a JVM server over PostgreSQL) and
-[haul](https://github.com/youndie/haul) (every screen a server-driven tree). None of them is the
-reference for a layout: the skills do not yet describe a JVM service on PostgreSQL.
+[haul](https://github.com/youndie/haul) (every screen a server-driven tree). What they paid for
+on a JVM service over PostgreSQL — the pool under an outage, migrations a rolling deploy
+survives, workers on two replicas — is a reference of `ktor-server-feature`; shashki's screens
+are where `compose-client-feature` learned its second view-model shape.
 The tool is [viddik](https://github.com/youndie/viddik), the screenshot-testing toolkit the
 testing and design skills lean on; `design-to-compose` needs its `viddikDesignParity` task
 (viddik 0.5.0 and later).

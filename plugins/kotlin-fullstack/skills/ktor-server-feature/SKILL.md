@@ -208,6 +208,7 @@ routing {
 | service-to-service | `authenticate` + `withRole` / `withAnyRole` at the mount | the tenant header is read **raw on purpose**: the calling service acts across tenants and the role is the gate |
 | management | a separate engine on a separate port plus a token plugin over the branch | outside is a `404`, not a `403` |
 | open | outside `authenticate` | health, version, third-party callbacks |
+| public, token optional | `authenticate(optional = true)` at the mount | a guest or a signed-in caller; a token that does not verify is **refused**, not read as a guest |
 | the signature is the authentication | **no gate at all**, deliberately | the endpoint id in the path selects the secret and the scheme; verification is the tier |
 
 A raw tenant header is a leak only on a route whose sole gate is "authenticated". A route
@@ -273,7 +274,9 @@ Port, both driver implementations, transaction adapters, the SQL variant and the
 [examples/storage-port-and-implementations.md](examples/storage-port-and-implementations.md). The
 Kotlin/Native form — sqlx4k statements, a row mapper, and why the driver's `Result` is unwrapped in
 the repository rather than handed to the use case — is
-[examples/repository-native-sqlx4k.md](examples/repository-native-sqlx4k.md).
+[examples/repository-native-sqlx4k.md](examples/repository-native-sqlx4k.md). A JVM service on
+PostgreSQL — pool timeouts under an outage, migrations a rolling deploy survives, a real database
+in tests, workers on two replicas: [references/jvm-postgres.md](references/jvm-postgres.md).
 
 ## DI
 
@@ -352,16 +355,13 @@ report a task up to date while the XML is from the previous run.
   plugins, mocking libraries) and what replaces it; the **release test run is mandatory** because
   the release binary omits type-cast checks; liveness never touches storage because a vanished
   database can hang a native query. Table in [examples/composition-and-distributions.md](examples/composition-and-distributions.md).
-  **Koin is the default there too** — it is multiplatform and `koin-ktor` publishes `linuxx64`, so
-  the layers move across verbatim. `ktor-server-di` avoids one dependency and charges for it:
-  `resolve()` is `suspend`, so dependencies are threaded through every routing function as
-  parameters instead of `by inject`. One service in this portfolio added the library and **never
-  wired it**, assembling everything by hand in `Application.kt` — an inconvenient prescription is
-  not disobeyed, it is quietly bypassed, which is worth knowing before choosing it.
-- **The engine the build runs on** (CIO, Netty, Jetty): a project-layout decision, not a feature
-  one, and a measured one — handing a request to a handler is a third to a half of a CIO service's
-  CPU against one to two per cent of a Netty one, and the right answer flips when handlers block.
-  `kmp-project-structure`, "The server engine is a per-build decision".
+  **Koin is the default there too**, wired with `installKoreKoin`, not `install(Koin)`
+  (`native-service-bootstrap`, step 5); the layers move across verbatim. `ktor-server-di` saves a
+  dependency and charges for it: `resolve()` is `suspend`, so dependencies are threaded through
+  every routing function instead of `by inject` — one service added it and **never wired it**,
+  assembling everything by hand: an inconvenient prescription is bypassed, not disobeyed.
+- **The engine the build runs on** (CIO, Netty, Jetty): a measured project-layout decision that
+  flips when handlers block — `kmp-project-structure`, "The server engine is a per-build decision".
 - **A library-style server** (several distributions, two engines): a composition-root function
   with lambdas, an isolated `koinApplication` instead of the global `startKoin`, dependencies
   handed to routes explicitly. Same file.

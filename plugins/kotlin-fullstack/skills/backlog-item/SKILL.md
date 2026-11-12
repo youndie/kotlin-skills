@@ -129,6 +129,16 @@ Read, in this order, following the ids in the frontmatter:
 - `docs/research/research-architecture.md` where it exists — why the architecture is what it
   is, and which hypotheses are still open.
 
+**A repository may keep fewer layers than this list; then the list is shorter, and the reading
+is not skipped.** The layers are optional in docs-bootstrap, and `docs/README.md` says which
+parts a repository keeps. One with a backlog of 180 items keeps three — the research, the items
+and a QA catalogue — and no feature, screen, endpoint or service documents: their draft fell
+about ninety items behind the code while it waited to land, and was closed (youndie/haul#2).
+There an item has no `epic`, and the assignment is the item's own decision and acceptance
+criteria, the research sections it cites ("Decided in B-…"), the QA cases of the area it
+touches, and the code at its anchors. Do not write a missing layer for one item: leaving it out
+is a decision the repository already made.
+
 Then the code the anchors point at. If the documents and the code disagree, the code is what
 exists and the document is what will be — record the difference in the item's findings and, if
 it changes the item, stop and turn the item into a `question` (below) rather than choosing
@@ -166,6 +176,9 @@ disagree.
   real status code or error string, in the same commit as the code that produces it;
 - a new document's `status: draft` becomes `active` only when the behaviour is real and
   verified; on the default branch a draft is an error;
+- where the repository keeps no feature layer, what the item found goes into its findings,
+  a decision others will rely on goes into the research under the item's id, and a QA case
+  whose expected result the change moves is corrected in the same commit, naming the item;
 - the backlog index and the coverage map are regenerated — `make fix`, which pinned runs both;
   on copies, the same scripts by name, `python3 scripts/backlog_index.py` and `python3
   scripts/coverage_map.py --fix`, because what a copied `make fix` runs varies — and every line
@@ -189,7 +202,8 @@ verdict and not a moment to edit in, so "before merge" is now.
   pipe.
 - Walk the feature's scenarios as a checklist against the running code or the test that
   encodes each one; tick them in the PR body. A scenario that cannot be exercised is not
-  ticked, and the PR says which.
+  ticked, and the PR says which. Where there is no feature document, the checklist is the
+  item's acceptance criteria, each with the test, golden or script that holds it.
 - A new test is checked by **mutation**, after the change is committed: `git stash` or
   `git revert --no-commit` the implementation, watch the test fail, restore, and confirm
   `git status` is what it was. On an uncommitted change the revert is the deletion.
@@ -203,8 +217,8 @@ missing, a design question, a verification that needs an environment you do not 
 what exists on the branch with the item still `wip`, add a dated `## Iteration <n>` entry to
 the item's findings saying what was done and what stopped it, **push**, and stop; the next
 iteration resumes at Step 1.2 and reads those entries. Three such entries on one item without
-a scenario moving from open to ticked make it a `question`, not a fourth attempt — the count
-is in the file, not in anyone's memory.
+a scenario or an acceptance criterion moving from open to ticked make it a `question`, not a
+fourth attempt — the count is in the file, not in anyone's memory.
 
 ## Step 6. Close the item, open the pull request
 

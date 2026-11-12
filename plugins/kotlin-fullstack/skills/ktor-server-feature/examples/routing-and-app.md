@@ -319,6 +319,40 @@ fun Application.configureRouting() {
 }
 ```
 
+## A public tier where the token is optional
+
+From [haul](https://github.com/youndie/haul), where a guest browses and fills a cart and a
+customer does the same signed in. The public routes sit under the same provider as the customer
+routes, with `optional = true`:
+
+```kotlin
+routing {
+    // Public: a guest, a customer or nobody. A token is optional, and one that does not verify is
+    // refused rather than ignored — a shopper whose sign-in lapsed is told, not shown as a guest.
+    authenticate(JWT_AUTH_OIDC, optional = true) {
+        catalogRouting()
+        cartRouting()
+    }
+    // Customer: a verified token, or `401 unauthenticated`.
+    authenticate(JWT_AUTH_OIDC) {
+        checkoutRouting()
+        orderRouting()
+    }
+}
+```
+
+`optional = true` lets a request with **no** credentials through and still rejects one whose
+credentials are wrong; leaving the public routes outside `authenticate` would instead ignore a
+bad token and answer as if nobody were signed in. Inside a handler the caller is then one of
+three — a customer by the token, a guest by a header the server issued, or nobody — resolved by
+one helper (`callers.of(call)`), and a route that needs an owner refuses "nobody" itself.
+
+The two refusals are different codes under one status, and that is the part that was paid for.
+"No credentials where a customer is needed" and "a guest id this server never issued" both answer
+`401`; a client that recovered from every `401` by asking for a new guest threw away the cart of
+a guest who had merely opened a customer's page by its address (haul B-115). The client now
+replaces its guest on `guest_not_found` alone — see `kmp-shared-contract`, "An error is a code".
+
 ## The access helper: caller, tenant, minimum role
 
 ```kotlin
