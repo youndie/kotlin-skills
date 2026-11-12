@@ -188,7 +188,10 @@ destination. All three were real defects.
 
 **State is derived, not assigned.** A view model's `UiState` is a `combine` of domain flows,
 input flows and its own `UiFlags`, turned into a `StateFlow` with `stateIn`. `state.value = …`
-in more than one place is the sign that two writers will race and one will erase the other.
+in more than one place is the sign that two writers will race and one will erase the other. A
+screen with nothing to observe — every value on it the answer to its own request — keeps one
+private `MutableStateFlow` instead, and every write is `update { }`, never `.value = .value.copy(…)`
+(`compose-client-feature`, "which shape the view model takes").
 
 ## Immutability and concurrency
 
@@ -247,7 +250,7 @@ above. Then read for:
 - [ ] an interface with one implementation and no test that fakes it
 - [ ] a base state, a base view model, or a generic CRUD repository over a marker interface
 - [ ] a `Flow<Result<T>>`; a `UseCase` base with a rethrowing `get()`; a hardcoded dispatcher in a base
-- [ ] `state.value =` in more than one place of a view model; a `success` or `loggedOut` flag in a state
+- [ ] `state.value =` in a view model, where `update { }` or a derivation belongs; a `success` or `loggedOut` flag in a state
 - [ ] a route reading the tenant from the body, or a repository method without the tenant in its signature
 - [ ] a `when` over use-case errors that swallows unknown ones into a `400`; a match on `error.message`
 - [ ] a role compared by `ordinal`; a refusal log that prints a token

@@ -1,6 +1,6 @@
 ---
 name: kmp-shared-contract
-description: "Design or change the wire contract between a Ktor server and Kotlin clients: @Resource path classes and DTOs in a shared module, money and date serializers, what stays out of the contract, status codes and wire Json settings, the checklist for changing a route or a field. Use for 'add/rename an endpoint's path or DTO', 'add a field to the model', 'client and server disagree', the shared/contract/api module."
+description: "Design or change the wire contract between a Ktor server and Kotlin clients: @Resource path classes and DTOs in a shared module, money and date serializers, what stays out of the contract, status codes, an error envelope with codes, wire Json settings, the checklist for changing a route or a field. Use for 'add/rename an endpoint's path or DTO', 'add a field to the model', 'client and server disagree', the shared/contract/api module."
 ---
 
 # The shared wire contract
@@ -143,6 +143,44 @@ project already does, but make sure each answer below has *a* decision.
 was a real hole: ownership checked against the path, the write addressed by the body, and a
 stranger's record rewritten with a `200`.
 
+## An error is a code, and the status is its fallback
+
+A text under a status is enough while a client only ever *shows* a refusal. The moment it has to
+*act* on one — mark the field, decide whether to recover, tell apart two refusals that share a
+status — it needs something to switch on, and that is a contract type:
+
+```kotlin
+@Serializable enum class ErrorCode { @SerialName("validation_failed") ValidationFailed, @SerialName("guest_not_found") GuestNotFound, /* … */ }
+
+@Serializable data class ErrorBody(val code: ErrorCode, val message: String, val field: String? = null, val fields: List<FieldError> = emptyList())
+@Serializable data class FieldError(val field: String, val code: ErrorCode, val message: String)
+```
+
+- **The client tells cases apart by `code`, never by the message and never by the status alone.**
+  One storefront answered `401` both for "no credentials where a customer is needed" and for "a
+  guest id this server never issued". The client recovered from every `401` by asking for a new
+  guest, so a guest who opened a customer's page by its address lost their cart — under a prompt
+  saying the cart would come along (haul B-115). It now replaces its guest on `guest_not_found` only.
+- **One function maps a code to its status**, an exhaustive `when` with no `else`, and every
+  refusal goes through one `respondError`: a new code does not compile until somebody has decided
+  its status. With codes carrying the meaning, the statuses can be finer than the table above
+  without a client depending on them — `409` for a conflict with the current state (out of stock,
+  a key reused), `422` for a well-formed request a rule refuses (a promo expired).
+- **`message` is still written for a person and still says what to fix**; `field` and `fields`
+  say where, so a refused form marks every field in one round trip.
+- **Keep "try again later" and "this is a bug" apart**: `unavailable` (`503`, a dependency is
+  down; not reported, the outage is said once by whoever met it) and `internal` (`500`, reported,
+  nothing of the exception in the body).
+- **The status has to be right on its own, because the body is not always an `ErrorBody`.** A
+  proxy answers with its own page; and an enum does not decode a name it has never seen, so a
+  client built before a code existed fails to parse the body. The decode is wrapped, its failure
+  is not an error of its own, and the client falls back to the status. A client that ships apart
+  from its server — a store build, not a bundle the server serves — will meet codes it does not know.
+
+The server half — an error that carries its code, the single mapping, and what the catch-all
+reports — is in
+[`ktor-server-feature`](../ktor-server-feature/examples/use-cases-and-errors.md#when-the-contract-carries-error-codes).
+
 ## Health as part of the contract
 
 Two resources, two questions (`/health` and `/health/ready`; the paths are the contract's, the
@@ -157,6 +195,23 @@ server skill only links here):
 The client can show the `/health` answer (the reference welcome screen prints
 `ktor · kotlin/native · 1.4.2`): the claim "the native build is what you are talking to" is then a
 live fact rather than a README sentence.
+
+## When the server draws the screens
+
+In a server-driven client (every screen a component tree the server builds; kompot is the toolkit
+here) the URL-building half of "one class, two uses" has no user: the client does not build an
+address, it follows the one an action in the tree carries. The paths are then **the server's
+strings**, written once in an object per feature beside its routing (`CartPaths.LINE`,
+`CartPaths.line(skuId)`) and handed out inside the tree. What the contract module still holds is
+what both sides still share: the components on the wire, the command bodies, `ErrorCode`.
+
+Two things follow. The greps in the checklist below read the other way round: string routes on
+the server are expected, and what must stay empty is a path literal in the **client**. And the
+few addresses a client needs *before* it has a tree — the screen prefix, the header, the session
+endpoints — are the old rule again: they are shared, so they belong in the contract module. The
+reference storefront spells that handful on each side and relies on its end-to-end walks to keep
+them equal, which is the copy this skill warns about, however short. Building the trees
+themselves is `kompot-layout`, in kompot's own repository.
 
 ## Checklist: changing a route
 

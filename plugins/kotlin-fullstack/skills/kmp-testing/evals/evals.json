@@ -1,0 +1,58 @@
+{
+  "skill_name": "kmp-testing",
+  "evals": [
+    {
+      "id": 1,
+      "name": "a-state-behind-stateIn-is-collected",
+      "prompt": "In the client at {fixture}, write the tests for AccountsViewModel: that by default only approved accounts are listed while the total counts all of them, and that showAll(true) lists every account. Put them where they belong. Do not run them; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} derived-vm",
+      "expected_output": "Tests in commonTest with kotlin.test and a hand-written fake repository, the main dispatcher replaced before the view model is built, and the stateIn(WhileSubscribed) state actually collected before it is asserted on.",
+      "expectations": [
+        "The state is collected before it is asserted on — through Turbine's test { }, or backgroundScope.launch { viewModel.uiState.collect {} } followed by runCurrent/advanceUntilIdle — rather than reading uiState.value straight after construction",
+        "Dispatchers.setMain is called with a test dispatcher before the view model is constructed, and reset afterwards",
+        "The repository is a hand-written fake implementing AccountRepository (holding a MutableStateFlow or similar); no mocking library is used or added",
+        "The view model is built with the real ObserveAccountsUseCase and RefreshAccountsUseCase over the fake, not with stand-ins for the use cases",
+        "Annotations and assertions come from kotlin.test; there is no org.junit import",
+        "Test names are sentences in backticks without commas, or camelCase",
+        "Waiting is by a condition or by advancing the scheduler until idle, not by advanceTimeBy with a guessed number",
+        "If a library was added for one test (Turbine), the answer says so and why; it is not added silently"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "a-record-after-a-copy-change-is-forced",
+      "prompt": "In the project at {fixture}, the button in CheckoutBar changed its label from \"Buy\" to \"Buy now\" (already in the code). Tell me exactly what to run to bring the screenshot goldens up to date and how I will know they were actually updated. Do not run anything — there is no Gradle wrapper here — and do not change the code.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} goldens",
+      "expected_output": "viddikRecord with --force, scoped to the Checkout fixtures, with the reason: a record writes only what a verification would reject, and one changed word on a full page is under this module's tolerance. Then git status and looking at the changed PNGs; the wide tolerance is called out, not widened.",
+      "expectations": [
+        "The record command includes --force (or -Dviddik.forceRecord=true)",
+        "The answer says why: without it viddikRecord writes only goldens that viddikVerify would reject, so a change smaller than the tolerance leaves the old golden in place",
+        "The command is scoped to the fixtures the change touches with --component (Checkout*), or the answer explains what an unscoped forced record will rewrite",
+        "The answer notices that both Checkout_Bar and Checkout_Page draw the bar, not only the first",
+        "The check that the goldens changed is concrete: git status / git diff showing the PNGs, and opening them to look at the new label",
+        "The answer does not propose raising tolerancePercent, and points out that 0.3 % on a 390x844 fixture is roughly a thousand pixels — enough to hide a changed word",
+        "The answer says to record where CI verifies (Linux) or notes that the bundled font is what makes another OS acceptable"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "a-storage-test-reads-the-raw-row",
+      "prompt": "In the server at {fixture}, somebody is about to change how JdbcOrderRepository writes the order total. Write the test that would catch the total being stored as anything but an exact decimal — text, a double — and say where it runs. Do not run it; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} money-storage",
+      "expected_output": "A test against a real PostgreSQL (Testcontainers) that saves through the repository and then reads the raw row with its own SQL — the column's type and the exact value — with a positive control, a pool that is closed, and migrations applied as production applies them.",
+      "expectations": [
+        "The test runs against a real PostgreSQL (Testcontainers), not a fake repository and not an in-memory database standing in for it",
+        "After saving through the repository, the test reads the stored row with its own statement — the column's type (pg_typeof, information_schema or ResultSetMetaData) or the raw value — rather than only calling repository.find",
+        "The answer says why: a test that goes through find writes and reads the same wrong way and passes on a diverged format",
+        "The asserted value has cents that a double would not hold exactly, or the assertion is on the type itself",
+        "There is a positive control: an assertion that proves the row looked at is the one just written, not an empty result",
+        "The schema comes from the project's migrations (Flyway), not from a create table statement written into the test",
+        "The pool and the container the test opens are closed, or come from a shared harness that owns them",
+        "Annotations and assertions come from kotlin.test"
+      ]
+    }
+  ]
+}

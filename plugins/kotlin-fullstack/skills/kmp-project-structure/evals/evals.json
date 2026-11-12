@@ -1,0 +1,39 @@
+{
+  "skill_name": "kmp-project-structure",
+  "evals": [
+    {
+      "id": 1,
+      "name": "hashing-is-not-an-expect",
+      "prompt": "The two-build server at {fixture} needs password hashing for sign-up and sign-in. I know jBCrypt on the JVM, so my plan is `expect fun hashPassword` / `expect fun verifyPassword` in server-common, jBCrypt in the JVM actual and something else in the native actual. Set it up — the build changes and where each file goes — and tell me if you would do it differently. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} two-build",
+      "expected_output": "No expect/actual pair: one implementation in commonMain on a multiplatform library whose linuxX64 artefact was checked, with the reason that two actuals diverge silently — a hash made by one build refused by the other shows up on the day the image is switched.",
+      "expectations": [
+        "The answer does not add an expect/actual pair for hashing; the implementation is one function in server-common's commonMain",
+        "The reason is given: the compiler checks an expect/actual pair for signature and never for behaviour, so two hashing implementations can produce hashes the other build refuses, and nothing fails until deployment",
+        "The library chosen is multiplatform, and the answer says it checked (or that one must check) that it publishes a linuxX64 artefact before depending on it from commonMain",
+        "No JVM-only coordinate (jBCrypt, or any `-jvm` artefact) is added to commonMain",
+        "If the library needs a provider or engine per platform, it is declared in each build module (server and server-native), not left to arrive transitively",
+        "A test for hashing and verification is placed in server-common's commonTest so that it runs on both targets",
+        "readEnv is left as the only expect, or the answer says the count of pairs stays at one"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "a-blocking-handler-decides-the-engine",
+      "prompt": "The service at {fixture} has a bad p99 under load. A colleague read that Netty costs half the CPU per request of CIO and wants to switch the engine. Should we? If yes, make the change; if not, say what to change instead. Either way give the reasoning a reviewer can check. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} blocking-jvm",
+      "expected_output": "The handlers block a thread, which is the case where the engine comparison flips: Netty's call group defaults to the processor count (two here) and would be the worst default; the options are to keep CIO, or to take Netty with callGroupSize raised, or to move the blocking off the handler — and to measure.",
+      "expectations": [
+        "The answer notices that every handler blocks a thread on JDBC, and says the 'Netty is cheaper' result holds for handlers that never block",
+        "It states that Netty's callGroupSize defaults to the processor count — two on this pod — so blocking handlers would queue behind two threads",
+        "It does not simply swap CIO for Netty with default settings",
+        "If Netty is chosen, callGroupSize is raised explicitly with a number tied to the pool size or the blocking time; if CIO is kept, the answer says its IO workers are the slack that keeps blocking handlers serving",
+        "Moving the JDBC call off the handler's thread (withContext(Dispatchers.IO) in a repository) is offered as the change that makes the engine question separate from the blocking one",
+        "The answer recommends measuring on this service before and after rather than quoting the per-request numbers as this service's",
+        "The engine stays a decision of the build's entry point; nothing about it is pushed into shared code"
+      ]
+    }
+  ]
+}

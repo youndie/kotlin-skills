@@ -1,0 +1,39 @@
+{
+  "skill_name": "kmp-shared-contract",
+  "evals": [
+    {
+      "id": 1,
+      "name": "a-new-path-is-written-once",
+      "prompt": "In the project at {fixture}, add 'the history of a transaction': an endpoint that returns the list of changes made to one transaction (when, which field, old value, new value), and the client call for it. Write the contract, the server route and the client data source. The storage is somebody else's task: give the port a method and stop there. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} history",
+      "expected_output": "A nested @Resource under TransactionResource.ById and a @Serializable DTO, both in :shared; a typed route on the server; a client call built from the same resource class; no string path on either side.",
+      "expectations": [
+        "The new path is a @Resource class in shared/, nested under TransactionResource.ById with a `parent` parameter that has a default",
+        "The change DTO is a @Serializable data class in shared/, and no copy of it is declared in server/ or composeApp/",
+        "The server registers the route with the typed resource (get<...>), not with a string path",
+        "The client builds the request from the resource class (http.get(TransactionResource.ById.History(...)) or equivalent), not from a string such as \"/transactions/$id/history\"",
+        "The moment of a change is an Instant or an ISO string with the choice stated, not a Long of unstated unit",
+        "The new port method takes the owner's id, and a transaction that is not the caller's answers the same status as one that does not exist",
+        "The answer mentions running, or shows the result of, a search for string paths on both sides"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "two-refusals-under-one-status",
+      "prompt": "A bug report against the storefront at {fixture}: a guest with three items in the cart opens /checkout by typing its address. The page correctly asks them to sign in — but the header's cart count drops to zero and the cart is empty when they go back. Find the cause and fix it on every side it needs fixing. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} guest-cart",
+      "expected_output": "The cause is named: the client replaces its guest on any 401, and /checkout's 401 for a guest is an expected answer. The fix gives the two refusals different codes in a contract type and makes the client switch on the code, with the status as the fallback.",
+      "expectations": [
+        "The cause is stated: Identity.get treats every 401 as 'the server does not know this guest' and asks for a new one, while /checkout answers 401 to a guest it knows",
+        "A contract type in shared/ carries a machine-readable code (an enum or equivalent) alongside the human-readable message, and the server answers with it",
+        "'No credentials where a customer is needed' and 'a guest id this server never issued' have different codes",
+        "The client replaces its guest only on the unknown-guest code, not on the status alone and not by matching the message text",
+        "The client still behaves sensibly when the 401 body is not the contract's error type (a proxy's page, an older server): the decode is guarded and the status is the fallback",
+        "The fix does not make the client stop replacing a guest altogether — a guest the server genuinely does not know still gets a new one",
+        "The string paths \"/cart\" and \"/checkout\" duplicated between client and server are either moved into the contract or pointed out"
+      ]
+    }
+  ]
+}

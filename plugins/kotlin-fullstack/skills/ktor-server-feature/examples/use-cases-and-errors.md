@@ -186,3 +186,55 @@ class CreateOrderUseCaseTest {
 In a JVM-only suite the fakes may be mocks (`coEvery { … } returns …`, `coVerify(exactly = 0)`);
 in a `commonTest` that compiles to native, fakes are the only option, and a fake with a `saved`
 list reads better than a verification anyway.
+
+## When the contract carries error codes
+
+The dispatcher above answers with texts. Where the contract has an `ErrorCode` and an `ErrorBody`
+(`kmp-shared-contract`, "An error is a code, and the status is its fallback"), each typed error
+carries its code, and the mapping to a status is written once. From
+[haul](https://github.com/youndie/haul), trimmed:
+
+```kotlin
+internal sealed class CartError(val code: ErrorCode, override val message: String, val field: String? = null) : Exception(message) {
+    class Invalid(field: String, message: String) : CartError(ErrorCode.ValidationFailed, message, field)
+    class OutOfStock(message: String) : CartError(ErrorCode.OutOfStock, message, "quantity")
+    class LineNotFound(val skuId: String) : CartError(ErrorCode.LineNotFound, "This item is no longer in your cart")
+}
+
+/** The one shape of every refusal. */
+internal suspend fun ApplicationCall.respondError(code: ErrorCode, message: String, field: String? = null, status: HttpStatusCode = status(code)) =
+    respondText(wireJson.encodeToString(ErrorBody.serializer(), ErrorBody(code, message, field)), ContentType.Application.Json, status)
+
+/** Exhaustive, no `else`: a new code does not compile until its status is decided. */
+internal fun status(code: ErrorCode): HttpStatusCode = when (code) {
+    ErrorCode.ValidationFailed -> HttpStatusCode.BadRequest
+    ErrorCode.Unauthenticated -> HttpStatusCode.Unauthorized
+    ErrorCode.LineNotFound -> HttpStatusCode.NotFound
+    ErrorCode.OutOfStock -> HttpStatusCode.Conflict
+    ErrorCode.Unavailable -> HttpStatusCode.ServiceUnavailable
+    ErrorCode.Internal -> HttpStatusCode.InternalServerError
+}
+```
+
+A route's `when` over a use case's errors then shrinks to `is CartError -> call.respondError(error.code, error.message, error.field)`,
+and the rule that an unknown error is rethrown stands as written.
+
+The reference goes one step further, and it is a choice, not the default: its operations throw
+the feature's sealed error instead of returning a `Result`, and `StatusPages` maps each **family**
+(`exception<CartError> { call, e -> call.respondError(e.code, e.message, e.field) }`), so a route
+is three lines and nothing dispatches. It fits a service whose every refusal has a code and whose
+routes never need to do anything *but* answer with it. What it gives up is the route's chance to
+react to one error differently (retry, compensate, answer `200` with a fallback), and a handler
+that has to do that catches the family itself. One exception to the single mapping is written
+where it is made: the same `guest_not_found` is `401` on a cart route, where the client replaces
+its guest, and `404` on the sign-in merge.
+
+**What the catch-all reports, on a service the public can reach.** The skill's rule is that
+whatever reaches `StatusPages` unexpected is reported, `400`s included. On an open storefront
+that filled the error tracker with crawlers' malformed queries and with one report per page for
+the length of a database outage, so its catch-all sorts three cases: one of Ktor's own client
+errors keeps its status and is logged at `info`, not reported; a database that cannot be reached
+is `unavailable` / `503`, logged without a stack and not reported — the outage is said once, by
+the pool that met it; anything else is `internal` / `500`, logged with its stack **before** it
+is reported, and nothing of the exception goes into the body. A client that left mid-answer (a
+closed event stream) is neither answered nor reported: nobody is there, and nothing failed.

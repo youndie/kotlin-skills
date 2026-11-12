@@ -1,0 +1,43 @@
+{
+  "skill_name": "kotlin-conventions",
+  "evals": [
+    {
+      "id": 1,
+      "name": "a-review-finds-what-was-paid-for",
+      "prompt": "Review the pull request in {fixture} — three Kotlin files that add an `order` feature to a two-build Ktor server and its Compose client. List what has to change before it merges, most serious first, with the reason for each. Do not rewrite the files.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} review",
+      "expected_output": "A ranked list that finds the security and correctness defects first (tenant from the body, token in the log, role by ordinal, errors matched by message and swallowed into 400, runCatching in suspend code) and then the structural ones (base state, Flow<Result>, success flag in state, org.junit and a comma in a commonTest name), each with its reason.",
+      "expectations": [
+        "The tenant (workspaceId) being read from the request body, rather than from a verified source, is reported as a defect",
+        "The refusal log printing the token is reported",
+        "Comparing roles by Enum.ordinal is reported, with the reason that declaration order is not a privilege order",
+        "Matching on error.message and answering every other failure with 400 is reported: unknown failures must be rethrown or reported, and the route should dispatch on a typed error",
+        "runCatching in suspend code (OrderService.create) and `catch (e: Exception)` without a cancellation rethrow are reported as swallowing CancellationException",
+        "BaseViewState is reported: a shared base state, replaced wholesale on every assignment so that an error erases the data on screen",
+        "Flow<Result<List<String>>> is reported as hiding failures inside the stream",
+        "The `saved` flag in the state is reported as an event stored as state",
+        "In the test file: the org.junit import in a commonTest that must compile for native, the comma in the backticked name, and an assertion that cannot fail are each reported",
+        "The @Suppress without a reason and the KDoc that restates the name are mentioned, and ranked below the defects above",
+        "The token-in-log and tenant-from-body findings appear before the naming and comment findings"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "a-dependency-is-not-an-expect",
+      "prompt": "In the two-build server at {fixture}, unexpected failures should be reported to an error tracker. The JVM build has an SDK for it; the native build has none yet, so there it should just log. I was going to add `expect class ErrorReporter` to server-common with an actual in each build. Add it the way this codebase should have it, wire it into StatusPages, and say why you chose that shape. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} reporter",
+      "expected_output": "No new expect. A `fun interface ErrorReporter` in server-common with Logging and Noop implementations, bound in DI by each build's module; StatusPages rethrows cancellation, logs, reports, and answers 500 without the message.",
+      "expectations": [
+        "No new `expect` declaration is added; ErrorReporter is an interface (ideally a `fun interface`) in server-common",
+        "The answer says why: an expect gives exactly one implementation per platform and nothing to substitute in a test, while a dependency bound in DI gives both",
+        "There is a logging implementation and a no-op one, and the default where no tracker is configured is the log, not silence",
+        "Each build binds its own implementation in its own module (the JVM build the SDK-backed one, the native build the logging one); server-common's module does not name the SDK",
+        "StatusPages rethrows CancellationException before reporting",
+        "The failure is logged before it is reported, and the 500 response does not carry the exception's message",
+        "The answer notes that when the tracker grows a native client, one binding in the native module changes and nothing else"
+      ]
+    }
+  ]
+}
