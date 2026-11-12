@@ -254,9 +254,13 @@ looks like here. Read every later number against that, and write the reading int
 
 ## Step 6. Record, verify, document
 
-1. `./gradlew :<module>:viddikRecord --component "Checkout*"` — then **look at the goldens**
-   and `git status`: the pattern scopes the record run, so only this screen's PNGs may have
-   changed; anything else in the diff is a pattern that matched too much.
+1. `./gradlew :<module>:viddikRecord --component "Checkout*" --force` — then **look at the
+   goldens** and `git status`: the pattern scopes the record run, so only this screen's PNGs may
+   have changed; anything else in the diff is a pattern that matched too much. `--force`
+   because a record otherwise writes only what `viddikVerify` would reject (viddik 0.6 and
+   later): on a screen that already had goldens, the last rounds of the loop — a gap, a weight,
+   a word — are often under that tolerance, and the old golden would stay as the reference of a
+   screen that no longer looks like it.
 2. `./gradlew :<module>:viddikVerify` green where the goldens are gated (`kmp-testing`).
 3. The screen document, if the repository keeps one in the docs-bootstrap format: its
    frontmatter gets a `design:` block — `canvas` (the URL), `references` (the `design/`

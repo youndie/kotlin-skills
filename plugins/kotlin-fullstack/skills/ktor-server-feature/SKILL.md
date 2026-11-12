@@ -263,10 +263,11 @@ logging the refused origin turns "the form does nothing" into a line. Code:
 - **Two drivers agree on the stored representation**, not on class shapes: ids as the driver's
   id type, money as the database's decimal, collection names as constants; verified by a
   raw-document test per build.
-- **Migrations, indexes and seeds run at start-up**, explicitly and idempotently, from a scope
-  cancelled on `ApplicationStopping`; never from `init { launch }` of a repository. On
-  Kotlin/Native an unhandled exception in a coroutine kills the process, so start-up work is
-  wrapped and reported.
+- **Schema migrations run before the engine starts**: a port opened ahead of its schema answers
+  the first requests with errors. Index builds and seeds may follow start-up, explicitly and
+  idempotently, from a scope the shutdown cancels and joins; never from `init { launch }` of a
+  repository. On Kotlin/Native an unhandled exception in a coroutine kills the process, so
+  start-up work is wrapped and reported.
 
 Port, both driver implementations, transaction adapters, the SQL variant and the migration traps:
 [examples/storage-port-and-implementations.md](examples/storage-port-and-implementations.md). The
@@ -342,10 +343,11 @@ report a task up to date while the XML is from the previous run.
   class on a two-build one; a required secret has **no default** and fails start-up with a reason
   (random-with-a-warning is for a README demo only); optional integrations are gated on their
   key; `init { require }` validates. [examples/auth-provider-and-config.md](examples/auth-provider-and-config.md).
-- **Background workers** (outbox, schedulers, expiry sweeps): classes with `start()` / `stop()`
-  wired to `ApplicationStarted` / `ApplicationStopping`, intervals as defaulted parameters,
-  registered with an explicit lambda; an outbox carries the id and the worker rereads the record.
-  [examples/routing-and-app.md](examples/routing-and-app.md).
+- **Background workers** (outbox, schedulers, expiry sweeps): classes with `start()` / `stop()`,
+  intervals as defaulted parameters, registered with an explicit lambda; an outbox carries the id
+  and the worker rereads the record. Stopped from `ApplicationStopping` only on a JVM build
+  without kore; everywhere else as a kore `consumer`, because on Kotlin/Native that event fires
+  *before* the engine drains. [examples/routing-and-app.md](examples/routing-and-app.md).
 - **Kotlin/Native**: what leaves `commonMain` (`java.*`, HOCON, JVM-only auth and logging
   plugins, mocking libraries) and what replaces it; the **release test run is mandatory** because
   the release binary omits type-cast checks; liveness never touches storage because a vanished

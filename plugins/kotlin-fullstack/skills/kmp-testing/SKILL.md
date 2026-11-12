@@ -294,10 +294,31 @@ keeping. viddik makes goldens portable once the fixture's theme bundles a face �
 `viddikTypography()` or the project's own font through `normalizeVerticalMetrics()` — and its
 own suite verifies on three operating systems that way; a project that has not done that has
 host-specific goldens, and those do not belong in a merge gate, which is why the comparison is
-a separate task from `test`. Keep the tolerance strict (viddik's default is 0.05 % of pixels
-with a ±2 channel allowance; a colour change once slipped through a looser one). **Look at the
-goldens after recording**, or a bug becomes the reference. The gap between a screen and the
-design it was built to is a different comparison with its own tolerance: `design-to-compose`.
+a separate task from `test`. **Look at the goldens after recording**, or a bug becomes the
+reference. The gap between a screen and the design it was built to is a different comparison
+with its own tolerance: `design-to-compose`.
+
+**A share of pixels forgives more as the canvas grows, so do not widen it.** viddik's default is
+0.05 % of pixels, a pixel counting past ±2 on a channel; on a 360×800 screen that share is 144
+pixels, enough for a status dot to turn from green to red. Two counts sit beside the share for
+that reason: the floor that forgives 16 stray pixels forgives only faint ones (viddik 0.7: a
+channel delta up to 96 — cross-OS residue measures 47, a full stop added to a heading 223), and
+the share itself absorbs at most 16 pronounced pixels (`pronouncedPixelBudget`, the default from
+0.8). A fixture that sets its own `tolerancePercent` is exempt from that budget, so a
+per-fixture tolerance is where an edit can still get through by size: keep those rare, each
+with its reason. The first verify after moving to 0.8 can fail goldens an edit had already gone
+past unnoticed; a failed comparison leaves `_ACTUAL.png` and `_EXPECTED.png` beside the
+`_DIFF.png` — look, then re-record. Raising the tolerance is never the fix.
+
+**`viddikRecord` writes only what a verification would reject** (viddik 0.6 and later), so
+after a change smaller than the tolerance it writes nothing and the golden goes on showing the
+old picture: haul found 24 goldens with text the code no longer drew, each a changed word or a
+recut glyph of a few hundred pixels on a full page (B-84). The 0.8 budget catches most edits of
+that size; what it cannot catch is faint by construction, so after a change of copy, glyphs,
+fonts or the Compose version record with `--force` (with `--component` for one screen) and
+read `git status`: the PNGs that changed are the ones to look at. From 0.8 the screenshot JVMs
+run in `en-US` unless `viddik { locale = … }` says otherwise — Compose Resources pick
+`values-<lang>` by the JVM's locale, so one commit could pass on one runner and fail on another.
 
 ## The Koin graph
 
