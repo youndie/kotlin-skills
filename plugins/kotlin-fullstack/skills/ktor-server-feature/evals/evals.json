@@ -1,0 +1,55 @@
+{
+  "skill_name": "ktor-server-feature",
+  "evals": [
+    {
+      "id": 1,
+      "name": "the-id-comes-from-the-path",
+      "prompt": "In the Ktor server at {fixture}, add an endpoint that changes a note: the client sends the whole Note as the body to the note's address. Add what the port and the route need, and the tests you would write (as code; do not build, there is no Gradle wrapper). The storage implementation is somebody else's task: write the port's signature and say what its filter must be.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} notes",
+      "expected_output": "A typed PATCH (or PUT) on NoteResource.ById whose write is addressed by the path's id and the caller's id, never by the id in the body; one answer for a note that is not the caller's and one that does not exist; a test for exactly that.",
+      "expectations": [
+        "The route is registered with the typed resource (patch<NoteResource.ById> or put<NoteResource.ById>), not with a string path",
+        "The note that is written takes its id from the path (for example `.copy(id = path.id)`), and the id in the request body is ignored or overwritten",
+        "The new port method takes the owner's id as a parameter, and the answer says the storage filter must include the owner as well as the id",
+        "A note that belongs to somebody else and a note that does not exist get the same status",
+        "There is a test in which a caller sends their own note's address with another user's note id in the body, and it asserts the other user's note is unchanged",
+        "The caller's id comes from withUser, not from the body or a header read in the handler",
+        "The answer does not add `authenticate` inside noteRouting"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "a-defaulted-lambda-under-singleOf",
+      "prompt": "In the server at {fixture}, CreateOrderUseCase generates its ids with UUID.randomUUID() inside invoke, so a test cannot predict them. Make the id source a constructor parameter that production does not have to supply. Change whatever else has to change with it, and say what you checked. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} defaulted-parameter",
+      "expected_output": "The parameter is added with a default; the Koin registration becomes an explicit lambda because singleOf would ask the container for a Function0; the graph test gains a resolution by type, since verify() does not see a defaulted parameter.",
+      "expectations": [
+        "CreateOrderUseCase takes the id source as a constructor parameter with a default (for example `ids: () -> String = { UUID.randomUUID().toString() }`)",
+        "The registration in orderModule is no longer singleOf(::CreateOrderUseCase): it is an explicit lambda such as `single { CreateOrderUseCase(get()) }`",
+        "The answer says why: singleOf resolves every constructor parameter, defaults included, so the default would become a request to the container for a function type and fail on first use, not at start-up",
+        "The graph test gains a check that resolves CreateOrderUseCase by type from a koinApplication (koin.get<CreateOrderUseCase>() or equivalent) with a stub for the repository, rather than relying on verify() alone",
+        "The answer states that verify() does not catch a missing binding for a parameter that has a default",
+        "runCatching in the suspend invoke is replaced by a variant that rethrows CancellationException, or the answer points it out"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "a-worker-on-two-replicas",
+      "prompt": "The service at {fixture} runs as one pod and went down during a node drain last week. Change it to run as two replicas. Make every change that needs making, in the code and in charts/app/values.yaml, and list what you verified and what somebody still has to verify on a real cluster. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} outbox-two-replicas",
+      "expected_output": "The replica count is not the only change: the outbox relay has no claim on its rows and would publish every row twice, so it gets a claim or runs on an elected leader; the connection count is checked against the database's limit; concurrent migration at start is addressed; the relay's stop joins.",
+      "expectations": [
+        "The answer identifies that OutboxRelay, started in every process, would publish each outbox row once per replica",
+        "The relay is changed so that only one replica publishes a given row: a claim in the database (for example `for update skip locked` inside a transaction, or an optimistic status update) or a leader election, and the answer says which and why",
+        "The connection budget is computed: two replicas plus the extra one during a rolling deploy, times a pool of 40, against 100 connections — and the pool size or the replica count is changed so it fits",
+        "The answer addresses two replicas starting at once and migrating: Flyway's own lock, or migrating in a separate step before the pods start",
+        "values.yaml is not changed to `replicas: 2` alone with everything else left as it was",
+        "The relay's stop() waits for its loop (cancelAndJoin or equivalent), or the answer points out that stop() only cancels",
+        "The answer lists, as not verified here, a real two-replica run in which no row is published twice — it does not claim that was tested"
+      ]
+    }
+  ]
+}

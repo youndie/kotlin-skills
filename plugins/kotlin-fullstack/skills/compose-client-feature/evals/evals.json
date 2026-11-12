@@ -1,0 +1,56 @@
+{
+  "skill_name": "compose-client-feature",
+  "evals": [
+    {
+      "id": 1,
+      "name": "request-response-screen-has-one-writer",
+      "prompt": "In the Compose Multiplatform client at {fixture}, add the class picker screen of the `ride` feature: it prices a journey per ride class, lets the rider select a class that has cars, and orders a ride with a button. The domain layer is already there. Write the view model, its state, actions and events, and the Screen and Content. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} quotes",
+      "expected_output": "A view model that holds one private MutableStateFlow written only through update { }, a sealed UiAction with one onAction, a UiEvent channel, a Screen/Content split, errors as UiText — and no combine or stateIn over flows the domain does not have.",
+      "expectations": [
+        "The view model's state is one private MutableStateFlow exposed as a StateFlow, and every write to it goes through update { } — there is no `_uiState.value = _uiState.value.copy(` anywhere",
+        "The state is not built with combine or stateIn, or the answer says in words that the screen has no observable source and therefore uses the one-writer shape",
+        "There is one onAction(action) taking a sealed UiAction, and navigation after a successful order leaves the view model as a UiEvent through a Channel exposed with receiveAsFlow, not as a flag in the state",
+        "A failure reaches the screen as UiText mapped from the error, not as throwable.message or a hard-coded English fallback built from it",
+        "The flag that prevents a second order is set before or in the same step as the check, not inside the launched coroutine after the check",
+        "A class with no car (pickupEtaSeconds == null) cannot be selected or ordered",
+        "Screen and Content are separate: the Content takes the state and onAction and knows neither the view model nor Koin"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "a-poll-stops-when-the-screen-is-covered",
+      "prompt": "A bug report against the client at {fixture}: a rider who opens the class picker before any driver is online sees 'no cars nearby' on every row, and when a driver comes online a minute later the screen does not change until the application is restarted. The server log shows no quote request after the first. Fix it, write the test, and say what you decided and why. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} quotes-loaded-once",
+      "expected_output": "The screen asks again on an interval while it is visible, from the composition's scope rather than from viewModelScope; a failed refresh keeps the prices on screen; the interval has a stated reason; a test drives the poll with virtual time.",
+      "expectations": [
+        "The quotes are asked for again periodically while the screen is shown",
+        "The polling loop is not launched from init or viewModelScope: it is a suspend function (or equivalent) run from the Screen's composition scope, such as a LaunchedEffect, or is otherwise bound to the screen being visible",
+        "The answer says why: a view model stays alive while its entry is on the back stack, so a loop in viewModelScope would go on asking under the next screen",
+        "A refresh that fails leaves the quotes already on screen in place and does not replace them with an error or an empty list",
+        "The interval is a named constant with a reason given for its value, not an unexplained literal",
+        "There is a test that starts the poll, changes what the fake repository answers, advances virtual time and asserts the state changed; it uses a fake RideRepository, not a mocking library",
+        "The fix does not introduce `_uiState.value = _uiState.value.copy(`"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "a-preference-from-another-screen-is-a-flow-in-the-combine",
+      "prompt": "In the client at {fixture}, add the accounts list screen: every account with its balance shown in the display currency the user chose in Settings, a refresh button, and a tap on an account opens its details. The domain layer is already there. Write the view model, state, actions, events, mapper, Screen and Content. Do not build; there is no Gradle wrapper.",
+      "files": ["evals/files/setup-fixture.sh"],
+      "setup": "evals/files/setup-fixture.sh {fixture} accounts",
+      "expected_output": "UiState derived with combine over the accounts flow, the display-currency flow and the screen's own flags, turned into a StateFlow with stateIn(WhileSubscribed); the currency observed, never read once; a failing source caught before combine; opening an account as a UiEvent.",
+      "expectations": [
+        "uiState is produced by combine(...) followed by stateIn with SharingStarted.WhileSubscribed, and there is no assignment to a state's .value anywhere in the view model",
+        "The display currency enters through observeCurrency() as one of the combined flows; currentCurrency() is not called once in init or in load",
+        "Loading and error live in a small flags holder updated with update { }, separate from the data flows",
+        "A failing source flow is caught before combine (a catch on the source), not after stateIn",
+        "Opening an account is a UiEvent sent through a Channel and collected by the Screen; the view model does not hold a navigation callback",
+        "The Screen collects the state with collectAsStateWithLifecycle, and the Content takes state and onAction only",
+        "Formatting of the balance is in a mapper object or function, not inline in the view model's combine lambda and not in the Content"
+      ]
+    }
+  ]
+}
