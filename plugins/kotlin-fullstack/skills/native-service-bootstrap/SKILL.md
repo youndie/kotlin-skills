@@ -201,8 +201,8 @@ because RSS will not:
 Shutdown order, three probes and `/version` are written by every service itself, and every service
 quietly breaks one of the three. They exist as a library: [kore](https://github.com/youndie/kore) —
 `io.github.youndie:kore-core`, `kore-ktor` and the Gradle plugin `io.github.youndie.kore.build`,
-resolved from a private Maven repository under `io.github.youndie`, not on Central yet. **Take 0.1.9
-or later**: each release from 0.1.6 to 0.1.9 fixed something the wiring below relies on.
+resolved from a private Maven repository under `io.github.youndie`, not on Central yet. **Take 0.1.10
+or later**: 0.1.6 to 0.1.10 each fixed something this wiring relies on, the last two with no compile error.
 
 **Why not by hand.** `EmbeddedServer.stop` runs its steps in the **opposite order** on Kotlin/Native
 and on the JVM. So `ApplicationStopping` — where every example closes the pool and the broker
@@ -365,6 +365,7 @@ research (`docs/research/research-architecture.md` in [metrik](https://github.co
 | **Kotlin/Native forbids commas in backticked test names** | `jvmTest` is green, the native test compilation fails in CI | rename it; the grep is in `kotlin-conventions`' review greps — run it on `commonTest` before pushing |
 | **A PASSIVE SQLite checkpoint does not reset the journal while readers are alive** (tracy M-137) | `-wal` grows linearly, the database file stops growing, half an hour later an OOM on a small heap | a 2-connection pool plus your own `wal_checkpoint(TRUNCATE)` on a timer and on size; `walBytes` in the size response |
 | **koin-ktor's `install(Koin)` leaks a native mutex on every request** (kore B-65) | resident memory climbs for days with no load to speak of; RSS over minutes shows nothing | `installKoreKoin { … }` from `kore-koin` (step 5). Check by counting malloc chunks, not RSS |
+| **kore's observability wiring attached no log capture before 0.1.17** (kore B-71) | request spans reach tracy and not one log line does; a service ran six weeks that way, and nothing failed | `installKoreObservability(settings)` from `kore-observability`, kore 0.1.17 or later: it captures from `WARN`. Check `logsCaptured`, and count stored records in tracy, not spans |
 | **glibc gives malloc an arena per thread, counting host cores** | resident memory follows the thread count; `smaps` shows a dozen anonymous mappings of 6–12 MB on 64 MB boundaries | `MALLOC_ARENA_MAX=2` in the reference Dockerfile — **only after an A/B on your own service**: without a database it did nothing, and with the system allocator it multiplied peak RSS by ten (step 1) |
 | **`pagedAllocator=false` buys the memory with CPU** (xyk, pgo-native-spike) | survives a limit the paged arms do not, at +19 % CPU per request | take it only for a limit nothing else survives, measured; spell it `-Xbinary=pagedAllocator=false`, not the deprecated `-Xallocator=std` (step 1) |
 | **`PRAGMA synchronous` reaches one connection out of the pool** | "write throughput differs by a multiple" is true for 1/N of the commits | a probe of N concurrent transactions; the only fixes are warming every connection or a knob upstream |
@@ -386,7 +387,6 @@ under 64 green tests.
 
 ## What not to do
 
-* **Do not build Kotlin/Native inside docker** — minutes turn into tens of minutes.
 * **Do not drag in nginx for static files.** Native Ktor serves them itself: `SystemFileSystem`
   (kotlinx-io) + `respondBytesWriter` + `ContentType.defaultForFilePath`. There is nowhere to get
   `Last-Modified` from — compute an ETag from the content once at startup.

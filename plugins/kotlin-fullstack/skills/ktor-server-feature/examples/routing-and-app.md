@@ -1,10 +1,11 @@
 # Application assembly, tiers at the mount, the access helper, role gates
 
 The first half is the public reference project (a two-build server, comments translated), with
-one edit: its routing functions take a `Route` receiver and `authenticate` is applied at the
+two edits. Its routing functions take a `Route` receiver and `authenticate` is applied at the
 mount, as the skill prescribes; the reference itself still opens `authenticate` inside each
-routing function. The second half is the multi-tenant shape of larger services, written
-generically.
+routing function. And the native `main` starts the engine with `startForKore()`, as
+`native-service-bootstrap` prescribes; the reference still calls `start(wait = false)` on an
+older kore. The second half is the multi-tenant shape of larger services, written generically.
 
 ## The shared assembly (`server-common`)
 
@@ -92,6 +93,7 @@ fun main(args: Array<String>) = EngineMain.main(args)
 fun Application.module() {
     val config = ManiConfig.fromEnv()
     configureManiPlugins(config)
+    // koin-ktor's plugin is right on the JVM and only there: see the native module below.
     install(Koin) {
         slf4jLogger()
         modules(coreModule(config), mongoStorageModule(config.mongo))
@@ -106,14 +108,45 @@ fun Application.module() {
 ```kotlin
 fun main() {
     val config = ManiConfig.fromEnv()
+    val deadlines = ShutdownDeadlines(gracePeriod = GRACE_PERIOD)   // the chart's terminationGracePeriodSeconds
     println("mani: starting on port ${config.port}, mongo ${config.mongo.host}")
-    embeddedServer(CIO, port = config.port) { maniModule(config) }.start(wait = true)
+
+    // Both live outside the application: they are asked DURING the stop, and inside `Application`
+    // they would last exactly until `stop()`.
+    val readiness = ReadinessGate()
+    val draining = DrainGate()          // what the 503 refusal reads; never readiness
+
+    val server = embeddedServer(CIO, port = config.port) {
+        installShutdownRefusal(draining)   // before the routes
+        maniModule(config)
+    }
+
+    // Not `start(wait = true)`: the main thread would stay inside the engine and never reach the
+    // signal wait, so nothing below would run and the process would be killed at the end of the
+    // grace period. Not `start(wait = false)` either; why, per target, is in native-service-bootstrap.
+    server.startForKore()
+
+    // Taken NOW, while the application is alive: the plan is built after the signal, and by then
+    // the drain has closed the application together with its Koin graph.
+    val mongo = server.application.get<MongoClient>()
+
+    runBlocking {
+        runUntilSignal(deadlines, onFinished = { run -> println(run.transcript) }) {
+            announce(AnnounceNotReady(readiness))
+            drain(EngineDrain(server, deadlines.drain, deadlines.drain + DRAIN_HARD_KILL, draining))
+            // The pool last: closing a C client under calls still inside it is not a dropped
+            // response, it is work in freed memory.
+            pool(mongoPool(mongo))
+        }
+    }
 }
 
 /** Assembly, as a function of its own so a test can bring it up through testApplication with the wiring that ships. */
 fun Application.maniModule(config: ManiConfig) {
     configureManiPlugins(config)
-    install(Koin) {
+    // Not `install(Koin)`: that plugin opens a Koin scope per call, and on Linux/Native each one
+    // leaves a pthread mutex in malloc that nothing frees — about 100 bytes per request, for good.
+    installKoreKoin {
         // Koin's default logger here: koin-logger-slf4j is JVM-only.
         modules(coreModule(config), mongknStorageModule(config.mongo))
     }
@@ -450,6 +483,7 @@ fun interface ErrorReporter {
 ## Workers with a lifecycle
 
 ```kotlin
+// A JVM build that does not take kore. See below for every other case.
 fun Application.module() {
     // … plugins, Koin, auth, routing …
     val indexes = get<IndexesScope>()
@@ -457,7 +491,7 @@ fun Application.module() {
     val expiry = get<HoldExpiryWorker>()
 
     monitor.subscribe(ApplicationStarted) {
-        indexes.launch { migrate(get()) }   // idempotent; survives restarts and several replicas
+        indexes.launch { ensureIndexes(get()) }   // idempotent; the service can answer without them
         outbox.start()
         expiry.start()
     }
@@ -480,3 +514,18 @@ fun main(args: Array<String>) {
     }
 }
 ```
+
+`ApplicationStopping` is the right place for `stop()` **only on a JVM build that does not take
+kore**. `EmbeddedServer.stop` runs its steps in the opposite order on Kotlin/Native: there the
+event fires *before* the engine drains, so a worker stopped in it is cancelled while the engine
+still accepts the requests that feed it — a report queue lost work it had already answered `202`
+for that way. On a native build, and on a JVM build wired through kore, the workers are
+`consumer(...)` participants of the shutdown plan and the pool is a `pool(...)` after them; each
+`stop()` joins its loop (`cancelAndJoin`), because a participant that only cancels returns while
+the work is still in flight. The plan and its order:
+[`native-service-bootstrap`, step 6](../../native-service-bootstrap/SKILL.md#6-the-lifecycle-kore-not-applicationstopping).
+
+What is launched after start-up above is index building, which the service can answer without.
+**A schema the first request needs is migrated before the engine starts**, in `main`: a port
+opened ahead of its schema answers the first requests with errors
+([storage-port-and-implementations.md](storage-port-and-implementations.md#migrations-and-indexes-at-start-up)).

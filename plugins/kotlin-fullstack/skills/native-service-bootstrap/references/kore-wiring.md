@@ -11,7 +11,14 @@ and each is a line in that `main` or that module whose reason is not visible in 
   connection was refused 13 ms after `SIGTERM` ([kore#90](https://github.com/youndie/kore/issues/90)).
   On Kotlin/Native Ktor's handler is armed between `start` and kore's own, runs `runBlocking` on the
   signal stack, and a `SIGTERM` in that window **hangs** the process ([kore B-63](https://github.com/youndie/kore/blob/main/docs/backlog/B-63-sigterm-right-after-start-segfaults.md)). `startForKore()`
-  closes both; `EngineDrain` refuses to be built beside a JVM hook that is still on.
+  closes both; `EngineDrain` refuses to be built beside a JVM hook that is still on. **Two of the
+  fixes behind this bullet are not compile errors to move back from**, which is why step 6 names a
+  floor: from 0.1.9 `startForKore()` installs kore's handler before Ktor's can meet a `SIGTERM`, and
+  from 0.1.10 that handler is C on the Linux targets. As a Kotlin function it initialised the
+  runtime on whichever thread received the signal, and a worker thread born at that moment died
+  with `SIGSEGV` when signalled the moment `/health` first answered — at a rate nobody pinned down
+  (1 start in 200 in one run, 0 in 300 in the next) and never under `gdb` ([kore B-64](https://github.com/youndie/kore/blob/main/docs/backlog/B-64-new-worker-thread-segfaults-at-birth.md)).
+  macOS keeps the Kotlin handler, and the defect with it: it is a development target there.
 * **The refusal reads a `DrainGate`, never readiness.** Readiness falls at the start of the announce,
   and the announce exists to keep **serving** while that news reaches every node. A refusal gated on
   readiness answers `503` to exactly the requests the wait is for. It passed every check for weeks,
@@ -59,4 +66,9 @@ and each is a line in that `main` or that module whose reason is not visible in 
   writes an object and puts it into `commonMain`. `commit` will be `unknown` wherever the build
   context has no `.git` — the usual case being `.dockerignore`. And beware: a file git **tracks**
   but `.dockerignore` excludes reads as deleted inside the build, and the stamp becomes `-dirty`
-  forever.
+  forever. `builtAt` is the wall clock unless `SOURCE_DATE_EPOCH` is set (kore 0.1.13 or later), so
+  a clean build never links to the same bytes twice: two links of one commit differed by 26 bytes,
+  6 of them this string and 20 the build-id that hashes the output. Set it to the commit time in
+  the image build and one commit is one binary, and so one image digest; anything but whole
+  seconds fails the task instead of falling back to the clock
+  ([kore B-66](https://github.com/youndie/kore/blob/main/docs/backlog/B-66-built-at-from-source-date-epoch.md)).

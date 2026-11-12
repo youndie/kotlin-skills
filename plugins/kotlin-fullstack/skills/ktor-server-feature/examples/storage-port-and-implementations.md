@@ -326,8 +326,11 @@ that stays absent instead of becoming 1970.
 
 ## Migrations and indexes at start-up
 
-- Run from the application's lifecycle (`ApplicationStarted`), from a scope cancelled on
-  `ApplicationStopping`; idempotent, so several replicas and restarts are fine.
+- **A schema the first request needs is migrated before the engine starts**, in `main`: a server
+  that opened its port ahead of its schema answers the first requests with errors. What the
+  service can answer without — index builds, seeds, backfills — may run after start-up, from a
+  scope the shutdown cancels and joins. Both are idempotent, so several replicas and restarts
+  are fine.
 - On Postgres, under an advisory lock (a rollout starts the second pod before stopping the first);
   on SQLite unlocked, because a second pod cannot exist. Do not nest a `runBlocking` inside the
   transaction that holds the lock: it blocks the thread the lock is waiting on.

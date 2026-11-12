@@ -12,6 +12,11 @@ two-build mechanics, the contract and the platform plumbing. The larger patterns
 typed errors, tenancy and role tiers, derived view-model state) come from production services
 and apps that are not public; they are described generically, with the defect that motivated
 each rule named next to it. Where a rule is specific to one product, the skill says so.
+Three more public services are built on this stack and are cited where a rule came from one of
+them: [shashki](https://github.com/youndie/shashki) and [konekt](https://github.com/youndie/konekt)
+(use cases, `@Resource` paths and typed errors on a JVM server over PostgreSQL) and
+[haul](https://github.com/youndie/haul) (every screen a server-driven tree). None of them is the
+reference for a layout: the skills do not yet describe a JVM service on PostgreSQL.
 The tool is [viddik](https://github.com/youndie/viddik), the screenshot-testing toolkit the
 testing and design skills lean on; `design-to-compose` needs its `viddikDesignParity` task
 (viddik 0.5.0 and later).

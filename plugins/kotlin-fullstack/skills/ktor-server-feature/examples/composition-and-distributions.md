@@ -161,8 +161,11 @@ fun Application.module() {
 // linuxX64Main — main()
 fun main() {
     val config = ServiceConfig()
-    embeddedServer(CIO, port = config.port) {
-        install(Koin) { modules(nativeAppModules(config)) }
+    val deadlines = ShutdownDeadlines(gracePeriod = GRACE_PERIOD)   // the chart's terminationGracePeriodSeconds
+    val server = embeddedServer(CIO, port = config.port) {
+        // Not `install(Koin)`: koin-ktor's plugin opens a scope per call, and on Linux/Native each
+        // scope leaves a mutex in malloc that nothing frees. `getKoin()` below reads the same container.
+        installKoreKoin { modules(nativeAppModules(config)) }
         launch {
             // On Kotlin/Native an unhandled exception in a coroutine kills the PROCESS, with a
             // core dump. Start-up work is wrapped and reported; the service comes up with a red
@@ -179,7 +182,11 @@ fun main() {
         configureAuth(config.oidc, validate = ::accessAllowed)
         config.metrics?.let { install(Metrics) { apiKey = it.apiKey } }
         routing { nativeRoutes() }
-    }.start(wait = true)
+    }
+    // Not `start(wait = true)`: the signal wait and the ordered shutdown after it are kore's, and
+    // with `wait = true` the main thread never reaches them (`native-service-bootstrap`, step 6).
+    server.startForKore()
+    runBlocking { runUntilSignal(deadlines) { /* announce, drain, consumers, pools */ } }
 }
 ```
 
